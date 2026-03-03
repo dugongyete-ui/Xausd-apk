@@ -1,4 +1,4 @@
-# FiboTrader — Fibonacci XAUUSD Trading Analysis App
+# LIBARTIN — Fibonacci XAUUSD Trading Analysis App
 
 ## Project Overview
 A professional mobile trading analysis app built with Expo (React Native) that performs real-time Fibonacci retracement analysis on XAUUSD (Gold/USD) using live data from Deriv WebSocket. All trading decisions are purely mathematical — no random, no visual assumptions.

@@ -9,6 +9,13 @@ import React, {
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { Platform } from "react-native";
+import {
+  requestNotificationPermission,
+  sendSignalNotification,
+  sendTPAlert,
+  sendSLAlert,
+} from "@/services/NotificationService";
 
 export interface Candle {
   open: number;
@@ -68,6 +75,8 @@ interface TradingContextValue {
   clearHistory: () => void;
   marketState: MarketState;
   marketNextOpen: string;
+  notificationEnabled: boolean;
+  requestNotifications: () => void;
 }
 
 const TradingContext = createContext<TradingContextValue | null>(null);
@@ -259,12 +268,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [balance, setBalanceState] = useState<number>(10000);
   const [marketState, setMarketState] = useState<MarketState>(forexMarketOpen() ? "open" : "closed");
   const [marketNextOpen, setMarketNextOpen] = useState(nextOpenDesc());
+  const [notificationEnabled, setNotificationEnabled] = useState<boolean>(false);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const marketCheckTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const savedSignalKeys = useRef<Set<string>>(new Set());
   const wasOpenRef = useRef<boolean>(forexMarketOpen());
+  // Flag: Deriv itself says market is closed — suppress auto-reconnect until market check says otherwise
+  const derivMarketClosedRef = useRef<boolean>(false);
 
   // ─── Startup: load all cached data instantly ──────────────────────────────
   useEffect(() => {
@@ -312,6 +324,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         } catch {}
       }
     });
+
+    // Request notification permission on native only
+    if (Platform.OS !== "web") {
+      requestNotificationPermission().then((granted) => {
+        setNotificationEnabled(granted);
+      });
+    }
   }, []);
 
   const setBalance = useCallback((b: number) => {
@@ -336,9 +355,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEY_SIGNALS, JSON.stringify([]));
   }, []);
 
+  const requestNotifications = useCallback(() => {
+    if (Platform.OS !== "web") {
+      requestNotificationPermission().then((granted) => {
+        setNotificationEnabled(granted);
+      });
+    }
+  }, []);
+
   // ─── WebSocket ─────────────────────────────────────────────────────────────
   const connect = useCallback(() => {
     if (!forexMarketOpen()) return;
+    if (derivMarketClosedRef.current) return;
     if (wsRef.current) { try { wsRef.current.close(); } catch {} }
     setConnectionStatus("connecting");
 
@@ -375,7 +403,22 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       try {
         const msg = JSON.parse(event.data);
         if (msg.error) {
-          console.error("[WS] Error:", msg.error.message);
+          const errMsg: string = msg.error.message ?? "";
+          console.error("[WS] Error:", errMsg);
+
+          // Deriv says market is closed — update state and stop reconnecting
+          if (
+            errMsg.toLowerCase().includes("market is presently closed") ||
+            errMsg.toLowerCase().includes("market is closed") ||
+            msg.error.code === "MarketIsClosed"
+          ) {
+            derivMarketClosedRef.current = true;
+            setMarketState("closed");
+            setMarketNextOpen("Market XAUUSD sedang tutup sementara (maintenance Deriv). Akan otomatis reconnect dalam 30 detik.");
+            if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+            // Close WS cleanly — market check timer will reset flag and reconnect
+            try { ws.close(); } catch {}
+          }
           return;
         }
 
@@ -455,8 +498,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     ws.onclose = () => {
       setConnectionStatus("disconnected");
-      if (forexMarketOpen()) {
-        reconnectTimer.current = setTimeout(connect, 3000);
+      wsRef.current = null;
+      // Don't reconnect if Deriv itself said market is closed — wait for market check timer
+      if (forexMarketOpen() && !derivMarketClosedRef.current) {
+        reconnectTimer.current = setTimeout(() => {
+          reconnectTimer.current = null;
+          connect();
+        }, 3000);
       }
     };
   }, []);
@@ -467,22 +515,36 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     marketCheckTimer.current = setInterval(() => {
       const isOpen = forexMarketOpen();
-      setMarketState(isOpen ? "open" : "closed");
-      setMarketNextOpen(isOpen ? "" : nextOpenDesc());
 
       const wasOpen = wasOpenRef.current;
       wasOpenRef.current = isOpen;
 
       if (isOpen && !wasOpen) {
         // Market just opened — keep cached candles visible while WS reconnects
+        derivMarketClosedRef.current = false;
+        setMarketState("open");
+        setMarketNextOpen("");
         setCurrentPrice(null);
         if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
         connect();
       } else if (!isOpen && wasOpen) {
         // Market just closed — disconnect WS, keep last candles visible
+        setMarketState("closed");
+        setMarketNextOpen(nextOpenDesc());
         if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
         if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; }
         setCurrentPrice(null);
+      } else if (isOpen) {
+        // Market should be open — if WS is disconnected (e.g. Deriv maintenance ended), try reconnect
+        const wsState = wsRef.current?.readyState;
+        const wsDisconnected = wsState === undefined || wsState === WebSocket.CLOSED || wsState === WebSocket.CLOSING;
+        if (wsDisconnected && !reconnectTimer.current) {
+          // Reset Deriv-closed flag so connect() is allowed to proceed
+          derivMarketClosedRef.current = false;
+          setMarketState("open");
+          setMarketNextOpen("");
+          connect();
+        }
       }
     }, 30_000);
 
@@ -609,6 +671,73 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (currentSignal) saveSignal(currentSignal, currentSignal.id);
   }, [currentSignal?.id, saveSignal]);
 
+  // ─── Notify when a NEW signal appears ─────────────────────────────────────
+  const prevSignalIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!currentSignal) return;
+    if (currentSignal.id === prevSignalIdRef.current) return;
+    prevSignalIdRef.current = currentSignal.id;
+    if (notificationEnabled && Platform.OS !== "web") {
+      sendSignalNotification({
+        trend: currentSignal.trend,
+        entryPrice: currentSignal.entryPrice,
+        stopLoss: currentSignal.stopLoss,
+        takeProfit: currentSignal.takeProfit,
+        riskReward: currentSignal.riskReward,
+        lotSize: currentSignal.lotSize,
+        confirmationType: currentSignal.confirmationType,
+      }).catch(() => {});
+    }
+  }, [currentSignal?.id, notificationEnabled]);
+
+  // ─── Track TP/SL hit for active signal ────────────────────────────────────
+  const tpSlNotifiedRef = useRef<{ id: string; tp: boolean; sl: boolean }>({
+    id: "",
+    tp: false,
+    sl: false,
+  });
+  useEffect(() => {
+    if (!currentSignal || currentPrice === null || !notificationEnabled || Platform.OS === "web") return;
+    const tracked = tpSlNotifiedRef.current;
+    if (tracked.id !== currentSignal.id) {
+      tpSlNotifiedRef.current = { id: currentSignal.id, tp: false, sl: false };
+    }
+
+    const isBull = currentSignal.trend === "Bullish";
+
+    // Check TP hit
+    if (!tpSlNotifiedRef.current.tp) {
+      const tpHit = isBull
+        ? currentPrice >= currentSignal.takeProfit
+        : currentPrice <= currentSignal.takeProfit;
+      if (tpHit) {
+        tpSlNotifiedRef.current.tp = true;
+        sendTPAlert({
+          trend: currentSignal.trend,
+          entryPrice: currentSignal.entryPrice,
+          takeProfit: currentSignal.takeProfit,
+          currentPrice,
+        }).catch(() => {});
+      }
+    }
+
+    // Check SL hit
+    if (!tpSlNotifiedRef.current.sl) {
+      const slHit = isBull
+        ? currentPrice <= currentSignal.stopLoss
+        : currentPrice >= currentSignal.stopLoss;
+      if (slHit) {
+        tpSlNotifiedRef.current.sl = true;
+        sendSLAlert({
+          trend: currentSignal.trend,
+          entryPrice: currentSignal.entryPrice,
+          stopLoss: currentSignal.stopLoss,
+          currentPrice,
+        }).catch(() => {});
+      }
+    }
+  }, [currentPrice, currentSignal, notificationEnabled]);
+
   const value = useMemo(
     () => ({
       candles: m5Candles,
@@ -628,11 +757,14 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       clearHistory,
       marketState,
       marketNextOpen,
+      notificationEnabled,
+      requestNotifications,
     }),
     [
       m5Candles, m15Candles, currentPrice, ema50, ema200, trend,
       fibLevels, currentSignal, signalHistory, atr, connectionStatus,
       balance, setBalance, inZone, clearHistory, marketState, marketNextOpen,
+      notificationEnabled, requestNotifications,
     ]
   );
 

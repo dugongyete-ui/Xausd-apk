@@ -105,11 +105,14 @@ function TrendBadge({ trend }: { trend: TrendState }) {
 function MarketClosedBanner() {
   const { marketState, marketNextOpen } = useTrading();
   if (marketState === "open") return null;
+  const isMaintenanceMsg = marketNextOpen.includes("maintenance");
   return (
     <View style={styles.marketClosedBanner}>
-      <Ionicons name="moon" size={16} color={C.textDim} />
+      <Ionicons name={isMaintenanceMsg ? "construct" : "moon"} size={16} color={C.textDim} />
       <View style={{ flex: 1 }}>
-        <Text style={styles.marketClosedTitle}>Pasar Tutup — Weekend</Text>
+        <Text style={styles.marketClosedTitle}>
+          {isMaintenanceMsg ? "Deriv Maintenance" : "Pasar Tutup — Weekend"}
+        </Text>
         {!!marketNextOpen && (
           <Text style={styles.marketClosedSub}>{marketNextOpen}</Text>
         )}
@@ -424,7 +427,7 @@ export default function DashboardScreen() {
       >
         <View style={styles.header}>
           <View>
-            <Text style={styles.headerTitle}>FiboTrader</Text>
+            <Text style={styles.headerTitle}>LIBARTIN</Text>
             <Text style={styles.headerSub}>Fibonacci Analysis · XAUUSD</Text>
           </View>
           <MaterialCommunityIcons name="finance" size={28} color={C.gold} />

@@ -8,6 +8,7 @@ import {
   Pressable,
   ScrollView,
   Alert,
+  Switch,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -55,7 +56,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 84 : insets.bottom + 60;
-  const { balance, setBalance, atr, connectionStatus, candles } = useTrading();
+  const { balance, setBalance, atr, connectionStatus, candles, notificationEnabled, requestNotifications } = useTrading();
   const [inputBalance, setInputBalance] = useState(String(balance));
   const [saved, setSaved] = useState(false);
 
@@ -144,9 +145,9 @@ export default function SettingsScreen() {
             <View style={styles.divider} />
             <InfoRow
               icon="database"
-              label="Candles Loaded"
-              value={`${candles.length} / 200`}
-              valueColor={candles.length >= 200 ? C.green : C.gold}
+              label="M5 Candles"
+              value={`${candles.length} / 50`}
+              valueColor={candles.length >= 50 ? C.green : C.gold}
             />
             <View style={styles.divider} />
             <InfoRow
@@ -212,15 +213,58 @@ export default function SettingsScreen() {
           </View>
         </View>
 
+        {/* Notification Section */}
+        {Platform.OS !== "web" && (
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>NOTIFIKASI</Text>
+            <View style={styles.card}>
+              <View style={styles.notifRow}>
+                <View style={styles.notifLeft}>
+                  <Ionicons
+                    name={notificationEnabled ? "notifications" : "notifications-off"}
+                    size={20}
+                    color={notificationEnabled ? C.gold : C.textDim}
+                  />
+                  <View>
+                    <Text style={styles.notifLabel}>Push Notification</Text>
+                    <Text style={styles.notifSub}>
+                      {notificationEnabled ? "Aktif — Sinyal BUY/SELL, TP & SL" : "Nonaktif — Ketuk untuk aktifkan"}
+                    </Text>
+                  </View>
+                </View>
+                <Switch
+                  value={notificationEnabled}
+                  onValueChange={(v) => {
+                    if (v) {
+                      requestNotifications();
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    }
+                  }}
+                  trackColor={{ false: C.border, true: C.goldBg }}
+                  thumbColor={notificationEnabled ? C.gold : C.textDim}
+                />
+              </View>
+              <View style={[styles.divider, { marginHorizontal: 0 }]} />
+              <View style={styles.notifInfoBox}>
+                <Ionicons name="information-circle" size={14} color={C.textDim} />
+                <Text style={styles.notifInfoText}>
+                  Notifikasi muncul saat sinyal terdeteksi dan ketika TP atau SL tercapai — mirip seperti notifikasi WhatsApp.{"\n\n"}
+                  <Text style={{ color: C.gold, fontFamily: "Inter_600SemiBold" }}>Catatan penting:</Text> Notifikasi HANYA aktif selama aplikasi terbuka (foreground/background). Jika aplikasi benar-benar ditutup (force close/swipe), sinyal tidak akan terdeteksi karena app perlu koneksi WebSocket ke Deriv. Biarkan app berjalan di background untuk hasil optimal.
+                </Text>
+              </View>
+            </View>
+          </View>
+        )}
+
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>ABOUT</Text>
           <View style={styles.card}>
             <View style={styles.aboutRow}>
               <MaterialCommunityIcons name="finance" size={24} color={C.gold} />
               <View style={styles.aboutText}>
-                <Text style={styles.aboutTitle}>FiboTrader</Text>
+                <Text style={styles.aboutTitle}>LIBARTIN</Text>
                 <Text style={styles.aboutSub}>
-                  Deterministic Fibonacci strategy · All decisions are purely mathematical · No random, no visual assumptions
+                  Analisis Fibonacci Deterministic untuk XAUUSD · Semua keputusan berbasis matematika murni · Tidak ada asumsi visual atau random
                 </Text>
               </View>
             </View>
@@ -390,5 +434,42 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: C.textSub,
     lineHeight: 18,
+  },
+  notifRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+  },
+  notifLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+    flex: 1,
+  },
+  notifLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 14,
+    color: C.text,
+  },
+  notifSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    color: C.textDim,
+    marginTop: 1,
+  },
+  notifInfoBox: {
+    flexDirection: "row",
+    gap: 8,
+    padding: 14,
+    alignItems: "flex-start",
+  },
+  notifInfoText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    color: C.textDim,
+    lineHeight: 17,
+    flex: 1,
   },
 });
