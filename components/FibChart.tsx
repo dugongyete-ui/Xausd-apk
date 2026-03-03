@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet, Platform } from "react-native";
+import { View, Text, StyleSheet } from "react-native";
 import Svg, {
   Rect,
   Line,
@@ -119,6 +119,7 @@ function LabeledLine({
 export function FibChart() {
   const {
     candles,
+    m15Candles,
     fibLevels,
     currentPrice,
     currentSignal,
@@ -201,7 +202,7 @@ export function FibChart() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>FIBONACCI CHART  ·  XAUUSD M5</Text>
+        <Text style={styles.title}>M15 ZONA  ·  M5 ENTRY  ·  XAUUSD</Text>
         <Text style={[styles.trendLabel, { color: trendColor }]}>{trendLabel}</Text>
       </View>
 
@@ -281,6 +282,67 @@ export function FibChart() {
               </G>
             );
           })}
+
+          {/* ─── BUY/SELL signal flag on the trigger candle ─── */}
+          {currentSignal && (() => {
+            const idx = visibleCandles.findIndex(
+              (c) => c.epoch === currentSignal.signalCandleEpoch
+            );
+            if (idx < 0) return null;
+            const isBull = currentSignal.trend === "Bullish";
+            const col = isBull ? C.green : C.red;
+            const cx = idx * candleW + candleW / 2;
+            const candle = visibleCandles[idx];
+            const flagLabel = isBull ? "▲ BUY" : "▼ SELL";
+            const flagW = 36;
+            const flagH = 16;
+
+            if (isBull) {
+              const tipY = priceToY(candle.high, lo, hi, plotH) - 4;
+              const labelY = tipY - flagH - 4;
+              return (
+                <G>
+                  {/* stem */}
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + flagH}
+                    stroke={col} strokeWidth={1} opacity={0.7} />
+                  {/* flag box */}
+                  <Rect
+                    x={cx - flagW / 2} y={labelY}
+                    width={flagW} height={flagH}
+                    fill={col} rx={4} opacity={0.92}
+                  />
+                  <SvgText
+                    x={cx} y={labelY + flagH - 4}
+                    fill="#fff" fontSize={9} fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {flagLabel}
+                  </SvgText>
+                </G>
+              );
+            } else {
+              const tipY = priceToY(candle.low, lo, hi, plotH) + 4;
+              const labelY = tipY + 4;
+              return (
+                <G>
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY}
+                    stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Rect
+                    x={cx - flagW / 2} y={labelY}
+                    width={flagW} height={flagH}
+                    fill={col} rx={4} opacity={0.92}
+                  />
+                  <SvgText
+                    x={cx} y={labelY + flagH - 4}
+                    fill="#fff" fontSize={9} fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {flagLabel}
+                  </SvgText>
+                </G>
+              );
+            }
+          })()}
 
           {/* ─── FIBONACCI LINES (drawn AFTER candles so labels are on top) ─── */}
 
@@ -405,17 +467,23 @@ export function FibChart() {
         {currentSignal && <LegItem color={C.green} label="Take Profit" />}
       </View>
 
-      {/* Loading overlays */}
-      {candles.length === 0 && (
+      {/* Loading overlay — only show when there is truly no data at all */}
+      {candles.length === 0 && m15Candles.length === 0 && (
         <View style={styles.overlay}>
           <Text style={styles.overlayText}>Menghubungkan ke Deriv WebSocket...</Text>
+          <Text style={[styles.overlayText, { fontSize: 10, marginTop: 4, opacity: 0.7 }]}>
+            Memuat data M15 + M5 pertama kali...
+          </Text>
         </View>
       )}
-      {candles.length > 0 && trend === "Loading" && (
-        <View style={styles.overlay}>
-          <Text style={styles.overlayText}>
-            Memuat {candles.length}/200 candle untuk EMA200...
-          </Text>
+      {/* Partial loading — M15 not yet complete but M5 has data */}
+      {candles.length > 0 && m15Candles.length > 0 && trend === "Loading" && (
+        <View style={[styles.overlay, { backgroundColor: "transparent" }]}>
+          <View style={styles.loadingPill}>
+            <Text style={styles.overlayText}>
+              M15: {m15Candles.length}/200
+            </Text>
+          </View>
         </View>
       )}
     </View>
@@ -524,5 +592,13 @@ const styles = StyleSheet.create({
     color: C.textSub,
     textAlign: "center",
     paddingHorizontal: 20,
+  },
+  loadingPill: {
+    backgroundColor: C.cardAlt + "E0",
+    borderRadius: 12,
+    paddingHorizontal: 14,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: C.border,
   },
 });

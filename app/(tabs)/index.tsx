@@ -46,17 +46,23 @@ function PulseDot({ color }: { color: string }) {
 
 function ConnectionBar({
   status,
+  marketState,
 }: {
   status: "connecting" | "connected" | "disconnected";
+  marketState: "open" | "closed";
 }) {
   const color =
-    status === "connected"
+    marketState === "closed"
+      ? C.textDim
+      : status === "connected"
       ? C.green
       : status === "connecting"
       ? C.gold
       : C.red;
   const label =
-    status === "connected"
+    marketState === "closed"
+      ? "CLOSED"
+      : status === "connected"
       ? "LIVE"
       : status === "connecting"
       ? "CONNECTING"
@@ -96,8 +102,24 @@ function TrendBadge({ trend }: { trend: TrendState }) {
   );
 }
 
+function MarketClosedBanner() {
+  const { marketState, marketNextOpen } = useTrading();
+  if (marketState === "open") return null;
+  return (
+    <View style={styles.marketClosedBanner}>
+      <Ionicons name="moon" size={16} color={C.textDim} />
+      <View style={{ flex: 1 }}>
+        <Text style={styles.marketClosedTitle}>Pasar Tutup — Weekend</Text>
+        {!!marketNextOpen && (
+          <Text style={styles.marketClosedSub}>{marketNextOpen}</Text>
+        )}
+      </View>
+    </View>
+  );
+}
+
 function PriceCard() {
-  const { currentPrice, trend, connectionStatus, candles } = useTrading();
+  const { currentPrice, trend, connectionStatus, candles, marketState } = useTrading();
   const prevPrice =
     candles.length > 1 ? candles[candles.length - 2].close : null;
   const delta =
@@ -110,7 +132,7 @@ function PriceCard() {
     <View style={styles.priceCard}>
       <View style={styles.priceRow}>
         <Text style={styles.priceLabel}>GOLD / USD</Text>
-        <ConnectionBar status={connectionStatus} />
+        <ConnectionBar status={connectionStatus} marketState={marketState} />
       </View>
       {currentPrice !== null ? (
         <>
@@ -145,56 +167,36 @@ function PriceCard() {
 }
 
 function EMARow() {
-  const { ema50, ema200, candles } = useTrading();
-  const lastClose =
-    candles.length > 0 ? candles[candles.length - 1].close : null;
-
-  const items = [
-    {
-      label: "EMA 50",
-      value: ema50,
-      isGreen: lastClose !== null && ema50 !== null && ema50 < lastClose,
-    },
-    {
-      label: "EMA 200",
-      value: ema200,
-      isGreen: lastClose !== null && ema200 !== null && ema200 < lastClose,
-    },
-    {
-      label: "CANDLES",
-      value: candles.length,
-      isCount: true,
-    },
-  ];
+  const { ema50, ema200, m15Candles, candles } = useTrading();
+  const lastClose = m15Candles.length > 0 ? m15Candles[m15Candles.length - 1].close : null;
 
   return (
     <View style={styles.emaRow}>
-      {items.map((item, i) => (
-        <View key={i} style={styles.emaItem}>
-          <Text style={styles.emaLabel}>{item.label}</Text>
-          {item.isCount ? (
-            <Text
-              style={[
-                styles.emaValue,
-                { color: item.value >= 200 ? C.green : C.gold },
-              ]}
-            >
-              {item.value}
-            </Text>
-          ) : item.value !== null && item.value !== undefined ? (
-            <Text
-              style={[
-                styles.emaValue,
-                { color: item.isGreen ? C.green : C.red },
-              ]}
-            >
-              {(item.value as number).toFixed(2)}
-            </Text>
-          ) : (
-            <Text style={[styles.emaValue, { color: C.textDim }]}>—</Text>
-          )}
-        </View>
-      ))}
+      {/* M15 candle progress */}
+      <View style={styles.emaItem}>
+        <Text style={styles.emaLabel}>M15</Text>
+        <Text style={[styles.emaValue, { color: m15Candles.length >= 200 ? C.green : C.gold }]}>
+          {m15Candles.length}/200
+        </Text>
+      </View>
+      {/* EMA 50 from M15 */}
+      <View style={styles.emaItem}>
+        <Text style={styles.emaLabel}>EMA50·M15</Text>
+        {ema50 !== null ? (
+          <Text style={[styles.emaValue, { color: lastClose !== null && ema50 < lastClose ? C.green : C.red }]}>
+            {ema50.toFixed(1)}
+          </Text>
+        ) : (
+          <Text style={[styles.emaValue, { color: C.textDim }]}>—</Text>
+        )}
+      </View>
+      {/* M5 candle count */}
+      <View style={styles.emaItem}>
+        <Text style={styles.emaLabel}>M5</Text>
+        <Text style={[styles.emaValue, { color: candles.length > 0 ? C.green : C.textDim }]}>
+          {candles.length}/50
+        </Text>
+      </View>
     </View>
   );
 }
@@ -297,26 +299,27 @@ function FibLevelsCard() {
 }
 
 function SignalCard() {
-  const { currentSignal, inZone, trend } = useTrading();
+  const { currentSignal, inZone, trend, m15Candles } = useTrading();
 
   if (!currentSignal) {
+    const loadMsg =
+      trend === "Loading"
+        ? `Memuat M15: ${m15Candles.length}/200 candle untuk EMA200...`
+        : trend === "No Trade"
+        ? "Trend belum jelas — EMA50 & EMA200 M15 harus sejajar"
+        : inZone
+        ? "Harga di zona M15 61.8–78.6% — tunggu konfirmasi M5 (rejection/engulfing)"
+        : "Harga belum masuk zona Fibonacci 61.8–78.6% (M15)";
+
     return (
       <View style={styles.section}>
-        <Text style={styles.sectionTitle}>SIGNAL</Text>
+        <Text style={styles.sectionTitle}>SIGNAL  ·  M15/M5</Text>
         <View style={styles.noSignalCard}>
           <View style={styles.noSignalIcon}>
             <Ionicons name="shield-checkmark" size={28} color={C.textDim} />
           </View>
-          <Text style={styles.noSignalTitle}>No Signal</Text>
-          <Text style={styles.noSignalSub}>
-            {trend === "Loading"
-              ? "Building candle history..."
-              : trend === "No Trade"
-              ? "Trend not aligned — EMA50/200 crossover required"
-              : inZone
-              ? "In Fibonacci zone — waiting for candle confirmation"
-              : "Price outside 61.8–78.6% Fibonacci zone"}
-          </Text>
+          <Text style={styles.noSignalTitle}>Belum Ada Sinyal</Text>
+          <Text style={styles.noSignalSub}>{loadMsg}</Text>
         </View>
       </View>
     );
@@ -349,6 +352,20 @@ function SignalCard() {
         </View>
       </View>
       <View style={[styles.signalCard, { borderColor: trendColor + "40" }]}>
+        {/* Confirmation type badge */}
+        <View style={styles.confirmRow}>
+          <View style={[styles.confirmBadge, { backgroundColor: trendColor + "18" }]}>
+            <Ionicons
+              name={currentSignal.confirmationType === "engulfing" ? "layers" : "radio-button-on"}
+              size={11}
+              color={trendColor}
+            />
+            <Text style={[styles.confirmText, { color: trendColor }]}>
+              {currentSignal.confirmationType === "engulfing" ? "ENGULFING M5" : "REJECTION M5"}
+            </Text>
+          </View>
+          <Text style={styles.confirmSub}>Zona M15 · Konfirmasi M5</Text>
+        </View>
         <View style={styles.signalMainRow}>
           <View>
             <Text style={styles.signalPriceLabel}>ENTRY</Text>
@@ -413,6 +430,7 @@ export default function DashboardScreen() {
           <MaterialCommunityIcons name="finance" size={28} color={C.gold} />
         </View>
 
+        <MarketClosedBanner />
         <PriceCard />
         <EMARow />
 
@@ -731,5 +749,52 @@ const styles = StyleSheet.create({
     fontSize: 10,
     color: C.textDim,
     textAlign: "center",
+  },
+  confirmRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: 14,
+  },
+  confirmBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+  },
+  confirmText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 10,
+    letterSpacing: 0.8,
+  },
+  confirmSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 10,
+    color: C.textDim,
+  },
+  marketClosedBanner: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    backgroundColor: C.cardAlt,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: 12,
+  },
+  marketClosedTitle: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 13,
+    color: C.textSub,
+  },
+  marketClosedSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    color: C.textDim,
+    marginTop: 2,
   },
 });

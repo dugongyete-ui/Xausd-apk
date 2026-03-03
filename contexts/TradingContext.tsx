@@ -26,6 +26,8 @@ export interface FibLevels {
   extensionNeg27: number;
 }
 
+export type ConfirmationType = "rejection" | "engulfing";
+
 export interface TradingSignal {
   id: string;
   pair: string;
@@ -39,12 +41,18 @@ export interface TradingSignal {
   timestampUTC: string;
   fibLevels: FibLevels;
   status: "active" | "closed";
+  signalCandleEpoch: number;
+  confirmationType: ConfirmationType;
 }
 
 export type TrendState = "Bullish" | "Bearish" | "No Trade" | "Loading";
+export type MarketState = "open" | "closed";
 
 interface TradingContextValue {
+  // M5 candles — shown in chart for precision entry view
   candles: Candle[];
+  // M15 candles — used for structure (EMA, swing, Fibonacci)
+  m15Candles: Candle[];
   currentPrice: number | null;
   ema50: number | null;
   ema200: number | null;
@@ -58,20 +66,59 @@ interface TradingContextValue {
   setBalance: (b: number) => void;
   inZone: boolean;
   clearHistory: () => void;
+  marketState: MarketState;
+  marketNextOpen: string;
 }
 
 const TradingContext = createContext<TradingContextValue | null>(null);
 
 const DERIV_WS_URL = "wss://ws.derivws.com/websockets/v3?app_id=114791";
 const SYMBOL = "frxXAUUSD";
-const GRANULARITY = 300;
-const CANDLE_COUNT = 200;
+
+// M15 — structure: EMA50/200, swing detection, Fibonacci zones
+const M15_GRAN = 900;
+const M15_COUNT = 200;
+
+// M5 — precision entry: rejection/engulfing confirmation
+const M5_GRAN = 300;
+const M5_COUNT = 50;
+
 const ATR_PERIOD = 14;
 const EMA50_PERIOD = 50;
 const EMA200_PERIOD = 200;
-const STORAGE_KEY_SIGNALS = "fibo_signals_v1";
+const STORAGE_KEY_SIGNALS = "fibo_signals_v2";
 const STORAGE_KEY_BALANCE = "fibo_balance_v1";
+const STORAGE_KEY_M15 = "fibo_m15_candles_v1";
+const STORAGE_KEY_M5 = "fibo_m5_candles_v1";
 
+// ─── Market hours ───────────────────────────────────────────────────────────
+function forexMarketOpen(): boolean {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (day === 6) return false;
+  if (day === 0) return mins >= 22 * 60;
+  if (day === 5) return mins < 22 * 60;
+  return true;
+}
+
+function nextOpenDesc(): string {
+  const now = new Date();
+  const day = now.getUTCDay();
+  const mins = now.getUTCHours() * 60 + now.getUTCMinutes();
+  if (day === 6) {
+    const minsLeft = 22 * 60 + (7 - 6) * 24 * 60 - mins;
+    return `Buka Minggu ~${Math.floor(minsLeft / 60)}j ${minsLeft % 60}m lagi`;
+  }
+  if (day === 0 && mins < 22 * 60) {
+    const minsLeft = 22 * 60 - mins;
+    return `Buka hari ini ${Math.floor(minsLeft / 60)}j ${minsLeft % 60}m lagi (~22:00 UTC)`;
+  }
+  if (day === 5 && mins >= 22 * 60) return "Buka Minggu ~22:00 UTC";
+  return "";
+}
+
+// ─── EMA helpers ─────────────────────────────────────────────────────────────
 export function calcEMA(closes: number[], period: number): number[] {
   if (closes.length < period) return [];
   const k = 2 / (period + 1);
@@ -107,8 +154,7 @@ function calcATR(candles: Candle[], period: number): number {
     const lc = Math.abs(candles[i].low - candles[i - 1].close);
     trs.push(Math.max(hl, hc, lc));
   }
-  const slice = trs.slice(-period);
-  return slice.reduce((a, b) => a + b, 0) / slice.length;
+  return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
 function findSwingHigh(candles: Candle[]): number | null {
@@ -119,9 +165,7 @@ function findSwingHigh(candles: Candle[]): number | null {
       c.high > candles[i - 2].high &&
       c.high > candles[i + 1].high &&
       c.high > candles[i + 2].high
-    ) {
-      return c.high;
-    }
+    ) return c.high;
   }
   return null;
 }
@@ -134,95 +178,139 @@ function findSwingLow(candles: Candle[]): number | null {
       c.low < candles[i - 2].low &&
       c.low < candles[i + 1].low &&
       c.low < candles[i + 2].low
-    ) {
-      return c.low;
-    }
+    ) return c.low;
   }
   return null;
 }
 
-function calcFib(
-  swingHigh: number,
-  swingLow: number,
-  trend: "Bullish" | "Bearish"
-): FibLevels {
+function calcFib(swingHigh: number, swingLow: number, trend: "Bullish" | "Bearish"): FibLevels {
   const range = swingHigh - swingLow;
   if (trend === "Bullish") {
     return {
-      swingHigh,
-      swingLow,
+      swingHigh, swingLow,
       level618: swingHigh - range * 0.618,
       level786: swingHigh - range * 0.786,
       extensionNeg27: swingHigh + range * 0.27,
     };
-  } else {
-    return {
-      swingHigh,
-      swingLow,
-      level618: swingLow + range * 0.618,
-      level786: swingLow + range * 0.786,
-      extensionNeg27: swingLow - range * 0.27,
-    };
   }
+  return {
+    swingHigh, swingLow,
+    level618: swingLow + range * 0.618,
+    level786: swingLow + range * 0.786,
+    extensionNeg27: swingLow - range * 0.27,
+  };
 }
 
-function checkCandleConfirmation(
-  candle: Candle,
-  trend: "Bullish" | "Bearish"
-): boolean {
+// ─── M5 Entry confirmation ───────────────────────────────────────────────────
+// Checks latest M5 candle for rejection (pin bar) pattern
+function checkRejection(candle: Candle, trend: "Bullish" | "Bearish"): boolean {
   const body = Math.abs(candle.close - candle.open);
   if (body === 0) return false;
   if (trend === "Bullish") {
     const lowerWick = Math.min(candle.open, candle.close) - candle.low;
-    return candle.close > candle.open && lowerWick > body;
-  } else {
-    const upperWick = candle.high - Math.max(candle.open, candle.close);
-    return candle.close < candle.open && upperWick > body;
+    return candle.close > candle.open && lowerWick >= body * 1.5;
   }
+  const upperWick = candle.high - Math.max(candle.open, candle.close);
+  return candle.close < candle.open && upperWick >= body * 1.5;
 }
 
-// Deterministic signal key: same key for same 5-min window + trend + entry zone
-function makeSignalKey(
-  price: number,
-  trend: string,
-  epochMs: number
-): string {
-  const fiveMinBucket = Math.floor(epochMs / (5 * 60 * 1000));
-  const priceZone = Math.round(price * 2) / 2; // round to 0.5 steps
-  return `${priceZone}_${trend}_${fiveMinBucket}`;
+// Checks last two M5 candles for engulfing pattern
+function checkEngulfing(prev: Candle, curr: Candle, trend: "Bullish" | "Bearish"): boolean {
+  const prevBody = Math.abs(prev.close - prev.open);
+  const currBody = Math.abs(curr.close - curr.open);
+  if (prevBody === 0 || currBody === 0) return false;
+  if (trend === "Bullish") {
+    const prevBear = prev.close < prev.open;
+    const currBull = curr.close > curr.open;
+    return prevBear && currBull && curr.close > prev.open && curr.open < prev.close;
+  }
+  const prevBull = prev.close > prev.open;
+  const currBear = curr.close < curr.open;
+  return prevBull && currBear && curr.close < prev.open && curr.open > prev.close;
 }
 
+function makeSignalKey(price: number, trend: string, epochMs: number): string {
+  const bucket = Math.floor(epochMs / (5 * 60 * 1000));
+  const zone = Math.round(price * 2) / 2;
+  return `${zone}_${trend}_${bucket}`;
+}
+
+function parseCandle(c: { open: string; high: string; low: string; close: string; epoch: number }): Candle | null {
+  const parsed = {
+    open: parseFloat(c.open),
+    high: parseFloat(c.high),
+    low: parseFloat(c.low),
+    close: parseFloat(c.close),
+    epoch: c.epoch,
+  };
+  if (isNaN(parsed.open) || isNaN(parsed.high) || isNaN(parsed.low) || isNaN(parsed.close)) return null;
+  return parsed;
+}
+
+// ─── Provider ─────────────────────────────────────────────────────────────────
 export function TradingProvider({ children }: { children: ReactNode }) {
-  const [candles, setCandles] = useState<Candle[]>([]);
+  // M5 candles — precision entry, shown in chart
+  const [m5Candles, setM5Candles] = useState<Candle[]>([]);
+  // M15 candles — structure, EMA/swing/Fibonacci
+  const [m15Candles, setM15Candles] = useState<Candle[]>([]);
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
-  const [connectionStatus, setConnectionStatus] = useState<
-    "connecting" | "connected" | "disconnected"
-  >("connecting");
+  const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [signalHistory, setSignalHistory] = useState<TradingSignal[]>([]);
   const [balance, setBalanceState] = useState<number>(10000);
+  const [marketState, setMarketState] = useState<MarketState>(forexMarketOpen() ? "open" : "closed");
+  const [marketNextOpen, setMarketNextOpen] = useState(nextOpenDesc());
+
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const marketCheckTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const savedSignalKeys = useRef<Set<string>>(new Set());
+  const wasOpenRef = useRef<boolean>(forexMarketOpen());
 
+  // ─── Startup: load all cached data instantly ──────────────────────────────
   useEffect(() => {
+    // Signal history
     AsyncStorage.getItem(STORAGE_KEY_SIGNALS).then((v) => {
       if (v) {
         try {
           const parsed: TradingSignal[] = JSON.parse(v);
           setSignalHistory(parsed);
           parsed.forEach((s) => {
-            const key = makeSignalKey(
-              s.entryPrice,
-              s.trend,
-              new Date(s.timestampUTC).getTime()
+            savedSignalKeys.current.add(
+              makeSignalKey(s.entryPrice, s.trend, new Date(s.timestampUTC).getTime())
             );
-            savedSignalKeys.current.add(key);
           });
         } catch {}
       }
     });
+
+    // Balance
     AsyncStorage.getItem(STORAGE_KEY_BALANCE).then((v) => {
       if (v) setBalanceState(parseFloat(v) || 10000);
+    });
+
+    // M15 candles — load from cache so EMA/Fibonacci is ready before WS connects
+    AsyncStorage.getItem(STORAGE_KEY_M15).then((v) => {
+      if (v) {
+        try {
+          const cached: Candle[] = JSON.parse(v);
+          if (cached.length >= EMA200_PERIOD) {
+            setM15Candles(cached);
+          }
+        } catch {}
+      }
+    });
+
+    // M5 candles — load from cache for chart
+    AsyncStorage.getItem(STORAGE_KEY_M5).then((v) => {
+      if (v) {
+        try {
+          const cached: Candle[] = JSON.parse(v);
+          if (cached.length > 0) {
+            setM5Candles(cached);
+            setCurrentPrice(cached[cached.length - 1].close);
+          }
+        } catch {}
+      }
     });
   }, []);
 
@@ -231,11 +319,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEY_BALANCE, String(b));
   }, []);
 
+  // Unlimited history
   const saveSignal = useCallback((sig: TradingSignal, key: string) => {
     if (savedSignalKeys.current.has(key)) return;
     savedSignalKeys.current.add(key);
     setSignalHistory((prev) => {
-      const next = [sig, ...prev].slice(0, 100);
+      const next = [sig, ...prev];
       AsyncStorage.setItem(STORAGE_KEY_SIGNALS, JSON.stringify(next));
       return next;
     });
@@ -247,29 +336,39 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     AsyncStorage.setItem(STORAGE_KEY_SIGNALS, JSON.stringify([]));
   }, []);
 
+  // ─── WebSocket ─────────────────────────────────────────────────────────────
   const connect = useCallback(() => {
-    if (wsRef.current) {
-      try {
-        wsRef.current.close();
-      } catch {}
-    }
+    if (!forexMarketOpen()) return;
+    if (wsRef.current) { try { wsRef.current.close(); } catch {} }
     setConnectionStatus("connecting");
+
     const ws = new WebSocket(DERIV_WS_URL);
     wsRef.current = ws;
 
     ws.onopen = () => {
       setConnectionStatus("connected");
-      ws.send(
-        JSON.stringify({
-          ticks_history: SYMBOL,
-          adjust_start_time: 1,
-          count: CANDLE_COUNT,
-          end: "latest",
-          granularity: GRANULARITY,
-          style: "candles",
-          subscribe: 1,
-        })
-      );
+
+      // Subscribe M15 — structure
+      ws.send(JSON.stringify({
+        ticks_history: SYMBOL,
+        adjust_start_time: 1,
+        count: M15_COUNT,
+        end: "latest",
+        granularity: M15_GRAN,
+        style: "candles",
+        subscribe: 1,
+      }));
+
+      // Subscribe M5 — precision entry
+      ws.send(JSON.stringify({
+        ticks_history: SYMBOL,
+        adjust_start_time: 1,
+        count: M5_COUNT,
+        end: "latest",
+        granularity: M5_GRAN,
+        style: "candles",
+        subscribe: 1,
+      }));
     };
 
     ws.onmessage = (event) => {
@@ -279,127 +378,160 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           console.error("[WS] Error:", msg.error.message);
           return;
         }
+
+        // Initial candle history — route by granularity in echo_req
         if (msg.msg_type === "candles" && Array.isArray(msg.candles)) {
-          const parsed: Candle[] = msg.candles
-            .map(
-              (c: {
-                open: string;
-                high: string;
-                low: string;
-                close: string;
-                epoch: number;
-              }) => ({
-                open: parseFloat(c.open),
-                high: parseFloat(c.high),
-                low: parseFloat(c.low),
-                close: parseFloat(c.close),
-                epoch: c.epoch,
-              })
-            )
-            .filter(
-              (c: Candle) =>
-                !isNaN(c.open) &&
-                !isNaN(c.high) &&
-                !isNaN(c.low) &&
-                !isNaN(c.close)
-            );
-          if (parsed.length > 0) {
-            setCandles(parsed);
+          const gran: number = msg.echo_req?.granularity ?? 0;
+          const parsed = msg.candles
+            .map((c: Parameters<typeof parseCandle>[0]) => parseCandle(c))
+            .filter((c: Candle | null): c is Candle => c !== null);
+          if (parsed.length === 0) return;
+
+          if (gran === M15_GRAN) {
+            setM15Candles(parsed);
+            // Persist so next startup is instant
+            AsyncStorage.setItem(STORAGE_KEY_M15, JSON.stringify(parsed)).catch(() => {});
+          } else if (gran === M5_GRAN) {
+            setM5Candles(parsed);
             setCurrentPrice(parsed[parsed.length - 1].close);
+            AsyncStorage.setItem(STORAGE_KEY_M5, JSON.stringify(parsed)).catch(() => {});
           }
-        } else if (msg.msg_type === "ohlc" && msg.ohlc) {
+          return;
+        }
+
+        // Live tick updates — route by ohlc.granularity
+        if (msg.msg_type === "ohlc" && msg.ohlc) {
           const o = msg.ohlc;
-          const newCandle: Candle = {
+          const gran: number = o.granularity ?? 0;
+          const nc: Candle = {
             open: parseFloat(o.open),
             high: parseFloat(o.high),
             low: parseFloat(o.low),
             close: parseFloat(o.close),
             epoch: o.open_time,
           };
-          if (
-            isNaN(newCandle.open) ||
-            isNaN(newCandle.high) ||
-            isNaN(newCandle.low) ||
-            isNaN(newCandle.close)
-          )
-            return;
-          setCurrentPrice(newCandle.close);
-          setCandles((prev) => {
-            if (prev.length === 0) return [newCandle];
+          if (isNaN(nc.open) || isNaN(nc.high) || isNaN(nc.low) || isNaN(nc.close)) return;
+
+          const updater = (
+            prev: Candle[],
+            maxCount: number,
+            storageKey: string,
+            minSaveLen: number
+          ): Candle[] => {
+            if (prev.length === 0) return [nc];
             const last = prev[prev.length - 1];
-            if (last.epoch === newCandle.epoch) {
+            if (last.epoch === nc.epoch) {
+              // Same candle updating (same epoch) — no save needed
               const updated = [...prev];
-              updated[updated.length - 1] = newCandle;
+              updated[updated.length - 1] = nc;
               return updated;
-            } else {
-              const next = [...prev, newCandle];
-              if (next.length > CANDLE_COUNT) next.shift();
-              return next;
             }
-          });
+            // New completed candle — append and persist
+            const next = [...prev, nc];
+            if (next.length > maxCount) next.shift();
+            if (next.length >= minSaveLen) {
+              AsyncStorage.setItem(storageKey, JSON.stringify(next)).catch(() => {});
+            }
+            return next;
+          };
+
+          if (gran === M15_GRAN) {
+            setM15Candles((prev) =>
+              updater(prev, M15_COUNT, STORAGE_KEY_M15, EMA200_PERIOD)
+            );
+          } else if (gran === M5_GRAN) {
+            setCurrentPrice(nc.close);
+            setM5Candles((prev) =>
+              updater(prev, M5_COUNT, STORAGE_KEY_M5, 1)
+            );
+          }
         }
       } catch (e) {
         console.error("[WS] Parse error:", e);
       }
     };
 
-    ws.onerror = () => {
-      setConnectionStatus("disconnected");
-    };
+    ws.onerror = () => setConnectionStatus("disconnected");
 
     ws.onclose = () => {
       setConnectionStatus("disconnected");
-      reconnectTimer.current = setTimeout(() => {
-        connect();
-      }, 3000);
+      if (forexMarketOpen()) {
+        reconnectTimer.current = setTimeout(connect, 3000);
+      }
     };
   }, []);
 
+  // ─── Market hours polling ──────────────────────────────────────────────────
   useEffect(() => {
     connect();
+
+    marketCheckTimer.current = setInterval(() => {
+      const isOpen = forexMarketOpen();
+      setMarketState(isOpen ? "open" : "closed");
+      setMarketNextOpen(isOpen ? "" : nextOpenDesc());
+
+      const wasOpen = wasOpenRef.current;
+      wasOpenRef.current = isOpen;
+
+      if (isOpen && !wasOpen) {
+        // Market just opened — keep cached candles visible while WS reconnects
+        setCurrentPrice(null);
+        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        connect();
+      } else if (!isOpen && wasOpen) {
+        // Market just closed — disconnect WS, keep last candles visible
+        if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+        if (wsRef.current) { try { wsRef.current.close(); } catch {} wsRef.current = null; }
+        setCurrentPrice(null);
+      }
+    }, 30_000);
+
     return () => {
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
+      if (marketCheckTimer.current) clearInterval(marketCheckTimer.current);
       if (wsRef.current) wsRef.current.close();
     };
   }, [connect]);
 
+  // ─── Indicators from M15 ──────────────────────────────────────────────────
   const ema50 = useMemo(() => {
-    if (candles.length < EMA50_PERIOD) return null;
-    const closes = candles.map((c) => c.close);
-    const arr = calcEMA(closes, EMA50_PERIOD);
+    if (m15Candles.length < EMA50_PERIOD) return null;
+    const arr = calcEMA(m15Candles.map((c) => c.close), EMA50_PERIOD);
     return arr.length > 0 ? arr[arr.length - 1] : null;
-  }, [candles]);
+  }, [m15Candles]);
 
   const ema200 = useMemo(() => {
-    if (candles.length < EMA200_PERIOD) return null;
-    const closes = candles.map((c) => c.close);
-    const arr = calcEMA(closes, EMA200_PERIOD);
+    if (m15Candles.length < EMA200_PERIOD) return null;
+    const arr = calcEMA(m15Candles.map((c) => c.close), EMA200_PERIOD);
     return arr.length > 0 ? arr[arr.length - 1] : null;
-  }, [candles]);
+  }, [m15Candles]);
 
+  // Trend from M15
   const trend = useMemo((): TrendState => {
-    if (candles.length < EMA200_PERIOD) return "Loading";
+    if (m15Candles.length < EMA200_PERIOD) return "Loading";
     if (ema50 === null || ema200 === null) return "Loading";
-    const lastClose = candles[candles.length - 1].close;
-    if (lastClose > ema200 && ema50 > ema200) return "Bullish";
-    if (lastClose < ema200 && ema50 < ema200) return "Bearish";
+    const last = m15Candles[m15Candles.length - 1].close;
+    if (last > ema200 && ema50 > ema200) return "Bullish";
+    if (last < ema200 && ema50 < ema200) return "Bearish";
     return "No Trade";
-  }, [candles, ema50, ema200]);
+  }, [m15Candles, ema50, ema200]);
 
+  // ATR from M15
   const atr = useMemo(() => {
-    if (candles.length < ATR_PERIOD + 1) return null;
-    return calcATR(candles, ATR_PERIOD);
-  }, [candles]);
+    if (m15Candles.length < ATR_PERIOD + 1) return null;
+    return calcATR(m15Candles, ATR_PERIOD);
+  }, [m15Candles]);
 
+  // Fibonacci levels from M15 swings
   const fibLevels = useMemo((): FibLevels | null => {
     if (trend === "Loading" || trend === "No Trade") return null;
-    const swingHigh = findSwingHigh(candles);
-    const swingLow = findSwingLow(candles);
-    if (swingHigh === null || swingLow === null) return null;
-    if (swingHigh <= swingLow) return null;
+    const swingHigh = findSwingHigh(m15Candles);
+    const swingLow = findSwingLow(m15Candles);
+    if (swingHigh === null || swingLow === null || swingHigh <= swingLow) return null;
     return calcFib(swingHigh, swingLow, trend);
-  }, [candles, trend]);
+  }, [m15Candles, trend]);
 
+  // Is current M5 price inside M15 Fibonacci zone?
   const inZone = useMemo(() => {
     if (!fibLevels || currentPrice === null) return false;
     const lo = Math.min(fibLevels.level618, fibLevels.level786);
@@ -407,26 +539,33 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return currentPrice >= lo && currentPrice <= hi;
   }, [fibLevels, currentPrice]);
 
+  // ─── Signal detection: M15 zone + M5 confirmation ─────────────────────────
   const currentSignal = useMemo((): TradingSignal | null => {
     if (
-      !fibLevels ||
-      !atr ||
-      atr <= 0 ||
-      trend === "Loading" ||
-      trend === "No Trade" ||
-      candles.length < 2 ||
-      currentPrice === null
-    )
-      return null;
+      !fibLevels || !atr || atr <= 0 ||
+      trend === "Loading" || trend === "No Trade" ||
+      m5Candles.length < 2 || currentPrice === null ||
+      marketState === "closed"
+    ) return null;
 
-    const lastCandle = candles[candles.length - 1];
     const lo = Math.min(fibLevels.level618, fibLevels.level786);
     const hi = Math.max(fibLevels.level618, fibLevels.level786);
 
+    // M15 zone check — is current M5 price inside M15 Fibonacci zone?
     if (currentPrice < lo || currentPrice > hi) return null;
-    if (!checkCandleConfirmation(lastCandle, trend as "Bullish" | "Bearish"))
-      return null;
 
+    const lastM5 = m5Candles[m5Candles.length - 1];
+    const prevM5 = m5Candles[m5Candles.length - 2];
+    const trendDir = trend as "Bullish" | "Bearish";
+
+    // M5 confirmation: rejection pin bar OR engulfing
+    const isRejection = checkRejection(lastM5, trendDir);
+    const isEngulfing = checkEngulfing(prevM5, lastM5, trendDir);
+    if (!isRejection && !isEngulfing) return null;
+
+    const confirmationType: ConfirmationType = isEngulfing ? "engulfing" : "rejection";
+
+    // SL/TP based on M15 ATR
     let sl: number;
     let tp: number;
     if (trend === "Bullish") {
@@ -438,9 +577,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
 
     const slDistance = Math.abs(currentPrice - sl);
-    const spread = atr * 0.05;
-    if (slDistance < spread * 3) return null;
-    if (atr < 0.1) return null;
+    if (slDistance < atr * 0.05 * 3 || atr < 0.1) return null;
 
     const riskAmount = balance * 0.01;
     const lotSize = riskAmount / slDistance;
@@ -453,8 +590,8 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return {
       id: sigKey,
       pair: "XAUUSD",
-      timeframe: "M5",
-      trend: trend as "Bullish" | "Bearish",
+      timeframe: "M15/M5",
+      trend: trendDir,
       entryPrice: currentPrice,
       stopLoss: sl,
       takeProfit: tp,
@@ -463,18 +600,19 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       timestampUTC: new Date(nowMs).toUTCString(),
       fibLevels,
       status: "active",
+      signalCandleEpoch: lastM5.epoch,
+      confirmationType,
     };
-  }, [fibLevels, atr, trend, currentPrice, candles, balance]);
+  }, [fibLevels, atr, trend, currentPrice, m5Candles, balance, marketState]);
 
   useEffect(() => {
-    if (currentSignal) {
-      saveSignal(currentSignal, currentSignal.id);
-    }
+    if (currentSignal) saveSignal(currentSignal, currentSignal.id);
   }, [currentSignal?.id, saveSignal]);
 
   const value = useMemo(
     () => ({
-      candles,
+      candles: m5Candles,
+      m15Candles,
       currentPrice,
       ema50,
       ema200,
@@ -488,22 +626,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       setBalance,
       inZone,
       clearHistory,
+      marketState,
+      marketNextOpen,
     }),
     [
-      candles,
-      currentPrice,
-      ema50,
-      ema200,
-      trend,
-      fibLevels,
-      currentSignal,
-      signalHistory,
-      atr,
-      connectionStatus,
-      balance,
-      setBalance,
-      inZone,
-      clearHistory,
+      m5Candles, m15Candles, currentPrice, ema50, ema200, trend,
+      fibLevels, currentSignal, signalHistory, atr, connectionStatus,
+      balance, setBalance, inZone, clearHistory, marketState, marketNextOpen,
     ]
   );
 

@@ -75,8 +75,22 @@ Located at `components/FibChart.tsx`. Uses `react-native-svg` to render:
 
 `scripts/install-deps.sh` — fast dependency installer. Run: `bash scripts/install-deps.sh`
 
+## Market Hours
+- `forexMarketOpen()` in TradingContext checks UTC day/time to determine if XAUUSD is trading
+- Market open: Mon 00:00 UTC → Fri 22:00 UTC; Sunday open after 22:00 UTC
+- When closed: WebSocket disconnects, signal detection paused, candles reset
+- When market re-opens (e.g. Sunday 22:00 UTC): auto-reconnects and rebuilds candle history
+- 30-second polling interval (`marketCheckTimer`) detects open/close transitions
+- Dashboard shows "Pasar Tutup — Weekend" banner with time-until-open countdown
+- Connection badge shows "CLOSED" when market is closed
+
+## Signal Candle Marker
+- `TradingSignal.signalCandleEpoch` stores the epoch of the candle that triggered the signal
+- FibChart draws a colored ▲ BUY or ▼ SELL flag directly on that candle (above for BUY, below for SELL)
+- Flag is a filled rectangle with stem line from candle wick tip
+
 ## Persistence
-- Signal history: AsyncStorage (up to 100 signals)
+- Signal history: AsyncStorage — unlimited (no cap), key: `fibo_signals_v2`
 - Account balance: AsyncStorage
 
 ## Workflows
