@@ -1,4 +1,3 @@
-// template
 import {
   Inter_400Regular,
   Inter_500Medium,
@@ -10,13 +9,26 @@ import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import React, { useEffect } from "react";
+import { Platform } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { queryClient } from "@/lib/query-client";
+import { TradingProvider } from "@/contexts/TradingContext";
 
-// Prevent the splash screen from auto-hiding before asset loading is complete.
 SplashScreen.preventAutoHideAsync();
+
+// On web, passing an empty map avoids the fontfaceobserver 6s timeout crash.
+// Custom fonts still work on native (Expo Go / builds) via @expo-google-fonts.
+const FONT_MAP =
+  Platform.OS === "web"
+    ? {}
+    : {
+        Inter_400Regular,
+        Inter_500Medium,
+        Inter_600SemiBold,
+        Inter_700Bold,
+      };
 
 function RootLayoutNav() {
   return (
@@ -27,12 +39,7 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
-  const [fontsLoaded, fontError] = useFonts({
-    Inter_400Regular,
-    Inter_500Medium,
-    Inter_600SemiBold,
-    Inter_700Bold,
-  });
+  const [fontsLoaded, fontError] = useFonts(FONT_MAP);
 
   useEffect(() => {
     if (fontsLoaded || fontError) {
@@ -45,9 +52,11 @@ export default function RootLayout() {
   return (
     <ErrorBoundary>
       <QueryClientProvider client={queryClient}>
-        <GestureHandlerRootView>
+        <GestureHandlerRootView style={{ flex: 1 }}>
           <KeyboardProvider>
-            <RootLayoutNav />
+            <TradingProvider>
+              <RootLayoutNav />
+            </TradingProvider>
           </KeyboardProvider>
         </GestureHandlerRootView>
       </QueryClientProvider>

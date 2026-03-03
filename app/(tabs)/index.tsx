@@ -1,29 +1,735 @@
-// template
-import { StyleSheet, Text, View } from "react-native";
+import React, { useRef, useEffect } from "react";
+import {
+  View,
+  Text,
+  ScrollView,
+  StyleSheet,
+  Platform,
+  Animated,
+} from "react-native";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
+import C from "@/constants/colors";
+import { useTrading, TrendState } from "@/contexts/TradingContext";
+import { FibChart } from "@/components/FibChart";
 
-export default function TabOneScreen() {
+function PulseDot({ color }: { color: string }) {
+  const anim = useRef(new Animated.Value(1)).current;
+  useEffect(() => {
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(anim, {
+          toValue: 0.3,
+          duration: 800,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+        Animated.timing(anim, {
+          toValue: 1,
+          duration: 800,
+          useNativeDriver: Platform.OS !== "web",
+        }),
+      ])
+    ).start();
+  }, [anim]);
   return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Your Replit app will be here</Text>
-      <Text style={styles.text}>Please wait until we finish building it</Text>
+    <Animated.View
+      style={{
+        width: 8,
+        height: 8,
+        borderRadius: 4,
+        backgroundColor: color,
+        opacity: anim,
+      }}
+    />
+  );
+}
+
+function ConnectionBar({
+  status,
+}: {
+  status: "connecting" | "connected" | "disconnected";
+}) {
+  const color =
+    status === "connected"
+      ? C.green
+      : status === "connecting"
+      ? C.gold
+      : C.red;
+  const label =
+    status === "connected"
+      ? "LIVE"
+      : status === "connecting"
+      ? "CONNECTING"
+      : "OFFLINE";
+  return (
+    <View style={styles.statusRow}>
+      <PulseDot color={color} />
+      <Text style={[styles.statusLabel, { color }]}>{label}</Text>
+      <Text style={styles.statusPair}>XAUUSD · M5</Text>
+    </View>
+  );
+}
+
+function TrendBadge({ trend }: { trend: TrendState }) {
+  const config: Record<
+    TrendState,
+    { color: string; bg: string; icon: "trending-up" | "trending-down" | "remove" | "hourglass" }
+  > = {
+    Bullish: { color: C.green, bg: C.greenBg, icon: "trending-up" },
+    Bearish: { color: C.red, bg: C.redBg, icon: "trending-down" },
+    "No Trade": { color: C.textSub, bg: C.card, icon: "remove" },
+    Loading: { color: C.textSub, bg: C.card, icon: "hourglass" },
+  };
+  const cfg = config[trend];
+  return (
+    <View
+      style={[
+        styles.trendBadge,
+        { backgroundColor: cfg.bg, borderColor: cfg.color + "30" },
+      ]}
+    >
+      <Ionicons name={cfg.icon} size={14} color={cfg.color} />
+      <Text style={[styles.trendText, { color: cfg.color }]}>
+        {trend.toUpperCase()}
+      </Text>
+    </View>
+  );
+}
+
+function PriceCard() {
+  const { currentPrice, trend, connectionStatus, candles } = useTrading();
+  const prevPrice =
+    candles.length > 1 ? candles[candles.length - 2].close : null;
+  const delta =
+    currentPrice !== null && prevPrice !== null
+      ? currentPrice - prevPrice
+      : null;
+  const isUp = delta !== null && delta >= 0;
+
+  return (
+    <View style={styles.priceCard}>
+      <View style={styles.priceRow}>
+        <Text style={styles.priceLabel}>GOLD / USD</Text>
+        <ConnectionBar status={connectionStatus} />
+      </View>
+      {currentPrice !== null ? (
+        <>
+          <Text style={styles.priceValue}>{currentPrice.toFixed(2)}</Text>
+          {delta !== null && (
+            <View style={styles.deltaRow}>
+              <Ionicons
+                name={isUp ? "arrow-up" : "arrow-down"}
+                size={14}
+                color={isUp ? C.green : C.red}
+              />
+              <Text style={[styles.deltaText, { color: isUp ? C.green : C.red }]}>
+                {Math.abs(delta).toFixed(2)}{" "}
+                ({delta >= 0 ? "+" : ""}
+                {prevPrice
+                  ? ((delta / prevPrice) * 100).toFixed(3)
+                  : 0}
+                %)
+              </Text>
+            </View>
+          )}
+        </>
+      ) : (
+        <View style={styles.priceSkeleton} />
+      )}
+      <View style={styles.trendRow}>
+        <Text style={styles.trendLabel}>TREND</Text>
+        <TrendBadge trend={trend} />
+      </View>
+    </View>
+  );
+}
+
+function EMARow() {
+  const { ema50, ema200, candles } = useTrading();
+  const lastClose =
+    candles.length > 0 ? candles[candles.length - 1].close : null;
+
+  const items = [
+    {
+      label: "EMA 50",
+      value: ema50,
+      isGreen: lastClose !== null && ema50 !== null && ema50 < lastClose,
+    },
+    {
+      label: "EMA 200",
+      value: ema200,
+      isGreen: lastClose !== null && ema200 !== null && ema200 < lastClose,
+    },
+    {
+      label: "CANDLES",
+      value: candles.length,
+      isCount: true,
+    },
+  ];
+
+  return (
+    <View style={styles.emaRow}>
+      {items.map((item, i) => (
+        <View key={i} style={styles.emaItem}>
+          <Text style={styles.emaLabel}>{item.label}</Text>
+          {item.isCount ? (
+            <Text
+              style={[
+                styles.emaValue,
+                { color: item.value >= 200 ? C.green : C.gold },
+              ]}
+            >
+              {item.value}
+            </Text>
+          ) : item.value !== null && item.value !== undefined ? (
+            <Text
+              style={[
+                styles.emaValue,
+                { color: item.isGreen ? C.green : C.red },
+              ]}
+            >
+              {(item.value as number).toFixed(2)}
+            </Text>
+          ) : (
+            <Text style={[styles.emaValue, { color: C.textDim }]}>—</Text>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+function FibLevelsCard() {
+  const { fibLevels, currentPrice, trend, inZone, atr } = useTrading();
+
+  if (!fibLevels) {
+    return null;
+  }
+
+  const levels = [
+    {
+      label: "Swing High",
+      value: fibLevels.swingHigh,
+      color: C.green,
+      pct: "100%",
+    },
+    {
+      label: "61.8% Zone",
+      value: fibLevels.level618,
+      color: C.gold,
+      pct: "61.8%",
+    },
+    {
+      label: "78.6% Zone",
+      value: fibLevels.level786,
+      color: C.gold,
+      pct: "78.6%",
+    },
+    {
+      label: "Swing Low",
+      value: fibLevels.swingLow,
+      color: C.red,
+      pct: "0%",
+    },
+    {
+      label: "-27% Target",
+      value: fibLevels.extensionNeg27,
+      color: C.blue,
+      pct: "-27%",
+    },
+  ];
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>FIBONACCI LEVELS</Text>
+        {inZone && (
+          <View style={styles.zoneBadge}>
+            <PulseDot color={C.gold} />
+            <Text style={styles.zoneText}>IN ZONE</Text>
+          </View>
+        )}
+      </View>
+      <View style={styles.fibCard}>
+        {levels.map((lvl, i) => {
+          const isCurrent =
+            currentPrice !== null && Math.abs(currentPrice - lvl.value) < 0.5;
+          return (
+            <View
+              key={i}
+              style={[
+                styles.fibRow,
+                i < levels.length - 1 && styles.fibRowBorder,
+                isCurrent && { backgroundColor: lvl.color + "15" },
+              ]}
+            >
+              <View style={[styles.fibDot, { backgroundColor: lvl.color }]} />
+              <View style={styles.fibInfo}>
+                <Text style={styles.fibLevelLabel}>{lvl.label}</Text>
+                <Text style={styles.fibPct}>{lvl.pct}</Text>
+              </View>
+              <Text style={[styles.fibValue, { color: lvl.color }]}>
+                {lvl.value.toFixed(2)}
+              </Text>
+            </View>
+          );
+        })}
+        {atr !== null && (
+          <View
+            style={[
+              styles.fibRow,
+              { borderTopWidth: 1, borderTopColor: C.border },
+            ]}
+          >
+            <View style={[styles.fibDot, { backgroundColor: C.textDim }]} />
+            <View style={styles.fibInfo}>
+              <Text style={styles.fibLevelLabel}>ATR (14)</Text>
+              <Text style={styles.fibPct}>Volatility</Text>
+            </View>
+            <Text style={[styles.fibValue, { color: C.textSub }]}>
+              {atr.toFixed(3)}
+            </Text>
+          </View>
+        )}
+      </View>
+    </View>
+  );
+}
+
+function SignalCard() {
+  const { currentSignal, inZone, trend } = useTrading();
+
+  if (!currentSignal) {
+    return (
+      <View style={styles.section}>
+        <Text style={styles.sectionTitle}>SIGNAL</Text>
+        <View style={styles.noSignalCard}>
+          <View style={styles.noSignalIcon}>
+            <Ionicons name="shield-checkmark" size={28} color={C.textDim} />
+          </View>
+          <Text style={styles.noSignalTitle}>No Signal</Text>
+          <Text style={styles.noSignalSub}>
+            {trend === "Loading"
+              ? "Building candle history..."
+              : trend === "No Trade"
+              ? "Trend not aligned — EMA50/200 crossover required"
+              : inZone
+              ? "In Fibonacci zone — waiting for candle confirmation"
+              : "Price outside 61.8–78.6% Fibonacci zone"}
+          </Text>
+        </View>
+      </View>
+    );
+  }
+
+  const isBull = currentSignal.trend === "Bullish";
+  const trendColor = isBull ? C.green : C.red;
+
+  return (
+    <View style={styles.section}>
+      <View style={styles.sectionHeader}>
+        <Text style={styles.sectionTitle}>ACTIVE SIGNAL</Text>
+        <View
+          style={[
+            styles.signalBadge,
+            {
+              backgroundColor: trendColor + "20",
+              borderColor: trendColor + "50",
+            },
+          ]}
+        >
+          <Ionicons
+            name={isBull ? "trending-up" : "trending-down"}
+            size={12}
+            color={trendColor}
+          />
+          <Text style={[styles.signalBadgeText, { color: trendColor }]}>
+            {currentSignal.trend.toUpperCase()}
+          </Text>
+        </View>
+      </View>
+      <View style={[styles.signalCard, { borderColor: trendColor + "40" }]}>
+        <View style={styles.signalMainRow}>
+          <View>
+            <Text style={styles.signalPriceLabel}>ENTRY</Text>
+            <Text style={[styles.signalPriceValue, { color: trendColor }]}>
+              {currentSignal.entryPrice.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.rrBlock}>
+            <Text style={styles.rrLabel}>R:R</Text>
+            <Text style={styles.rrValue}>1:{currentSignal.riskReward}</Text>
+          </View>
+        </View>
+        <View style={styles.signalDivider} />
+        <View style={styles.signalLevelsRow}>
+          <View style={styles.signalLevel}>
+            <View style={[styles.levelDot, { backgroundColor: C.red }]} />
+            <Text style={styles.levelKey}>SL</Text>
+            <Text style={[styles.levelVal, { color: C.red }]}>
+              {currentSignal.stopLoss.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.signalLevel}>
+            <View style={[styles.levelDot, { backgroundColor: C.green }]} />
+            <Text style={styles.levelKey}>TP</Text>
+            <Text style={[styles.levelVal, { color: C.green }]}>
+              {currentSignal.takeProfit.toFixed(2)}
+            </Text>
+          </View>
+          <View style={styles.signalLevel}>
+            <View style={[styles.levelDot, { backgroundColor: C.blue }]} />
+            <Text style={styles.levelKey}>LOT</Text>
+            <Text style={[styles.levelVal, { color: C.blue }]}>
+              {currentSignal.lotSize.toFixed(2)}
+            </Text>
+          </View>
+        </View>
+        <Text style={styles.signalTime}>{currentSignal.timestampUTC}</Text>
+      </View>
+    </View>
+  );
+}
+
+export default function DashboardScreen() {
+  const insets = useSafeAreaInsets();
+  const topPad = Platform.OS === "web" ? 67 : insets.top;
+  const botPad = Platform.OS === "web" ? 84 : insets.bottom + 60;
+
+  return (
+    <View style={[styles.container, { paddingTop: topPad }]}>
+      <ScrollView
+        contentContainerStyle={{
+          paddingBottom: botPad + 16,
+          paddingHorizontal: 16,
+        }}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.header}>
+          <View>
+            <Text style={styles.headerTitle}>FiboTrader</Text>
+            <Text style={styles.headerSub}>Fibonacci Analysis · XAUUSD</Text>
+          </View>
+          <MaterialCommunityIcons name="finance" size={28} color={C.gold} />
+        </View>
+
+        <PriceCard />
+        <EMARow />
+
+        {/* Chart always visible */}
+        <View style={styles.section}>
+          <FibChart />
+        </View>
+
+        <FibLevelsCard />
+        <SignalCard />
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
+  container: { flex: 1, backgroundColor: C.bg },
+  header: {
+    flexDirection: "row",
+    justifyContent: "space-between",
     alignItems: "center",
-    justifyContent: "center",
+    marginBottom: 16,
+    paddingTop: 8,
+  },
+  headerTitle: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 22,
+    color: C.text,
+    letterSpacing: 0.3,
+  },
+  headerSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: C.textSub,
+    marginTop: 2,
+  },
+  statusRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  statusLabel: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 10,
+    letterSpacing: 1,
+  },
+  statusPair: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 10,
+    color: C.textDim,
+    marginLeft: 4,
+  },
+  priceCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    padding: 20,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+  },
+  priceRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  priceLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 12,
+    color: C.textDim,
+    letterSpacing: 1.5,
+  },
+  priceValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 40,
+    color: C.text,
+    letterSpacing: -1,
+  },
+  priceSkeleton: {
+    height: 48,
+    borderRadius: 8,
+    backgroundColor: C.cardAlt,
+    marginVertical: 4,
+  },
+  deltaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  deltaText: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 13,
+  },
+  trendRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: C.border,
+  },
+  trendLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 11,
+    color: C.textDim,
+    letterSpacing: 1.2,
+  },
+  trendBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  trendText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 11,
+    letterSpacing: 1,
+  },
+  emaRow: {
+    flexDirection: "row",
+    gap: 8,
+    marginBottom: 12,
+  },
+  emaItem: {
+    flex: 1,
+    backgroundColor: C.card,
+    borderRadius: 12,
+    padding: 12,
+    borderWidth: 1,
+    borderColor: C.border,
+    alignItems: "center",
+  },
+  emaLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 10,
+    color: C.textDim,
+    letterSpacing: 1,
+    marginBottom: 4,
+  },
+  emaValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 13,
+    color: C.text,
+  },
+  section: { marginBottom: 12 },
+  sectionTitle: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 11,
+    color: C.textDim,
+    letterSpacing: 1.5,
+    marginBottom: 8,
+  },
+  sectionHeader: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 8,
+  },
+  fibCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    overflow: "hidden",
+  },
+  fibRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    padding: 14,
+    gap: 12,
+  },
+  fibRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  fibDot: { width: 8, height: 8, borderRadius: 4 },
+  fibInfo: { flex: 1 },
+  fibLevelLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 13,
+    color: C.text,
+  },
+  fibPct: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    color: C.textDim,
+    marginTop: 1,
+  },
+  fibValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 15,
+    letterSpacing: 0.3,
+  },
+  zoneBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    backgroundColor: C.goldBg,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+  },
+  zoneText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 10,
+    color: C.gold,
+    letterSpacing: 1,
+  },
+  noSignalCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 28,
+    alignItems: "center",
     gap: 8,
   },
-  title: {
-    fontSize: 20,
-    fontWeight: "bold",
+  noSignalIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+    backgroundColor: C.cardAlt,
+    justifyContent: "center",
+    alignItems: "center",
+    marginBottom: 4,
   },
-  text: {
+  noSignalTitle: {
+    fontFamily: "Inter_600SemiBold",
     fontSize: 16,
+    color: C.textSub,
+  },
+  noSignalSub: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: C.textDim,
     textAlign: "center",
-    paddingHorizontal: 20,
+    lineHeight: 18,
+  },
+  signalCard: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    padding: 16,
+  },
+  signalBadge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 5,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 20,
+    borderWidth: 1,
+  },
+  signalBadgeText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 10,
+    letterSpacing: 0.8,
+  },
+  signalMainRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-end",
+    marginBottom: 14,
+  },
+  signalPriceLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 11,
+    color: C.textDim,
+    letterSpacing: 1,
+    marginBottom: 2,
+  },
+  signalPriceValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 30,
+    letterSpacing: -0.5,
+  },
+  rrBlock: { alignItems: "flex-end" },
+  rrLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 10,
+    color: C.textDim,
+    letterSpacing: 1,
+  },
+  rrValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 20,
+    color: C.gold,
+  },
+  signalDivider: {
+    height: 1,
+    backgroundColor: C.border,
+    marginBottom: 14,
+  },
+  signalLevelsRow: {
+    flexDirection: "row",
+    justifyContent: "space-around",
+    marginBottom: 12,
+  },
+  signalLevel: { alignItems: "center", gap: 4 },
+  levelDot: { width: 6, height: 6, borderRadius: 3 },
+  levelKey: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 10,
+    color: C.textDim,
+    letterSpacing: 1,
+  },
+  levelVal: { fontFamily: "Inter_700Bold", fontSize: 14 },
+  signalTime: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 10,
+    color: C.textDim,
+    textAlign: "center",
   },
 });
