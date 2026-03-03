@@ -93,6 +93,55 @@ Located at `components/FibChart.tsx`. Uses `react-native-svg` to render:
 - Signal history: AsyncStorage — unlimited (no cap), key: `fibo_signals_v2`
 - Account balance: AsyncStorage
 
+## Caching Strategy (Startup Performance)
+- M15 candles cached in AsyncStorage (`fibo_m15_candles_v1`) — 200 candles for instant EMA/Fibonacci on boot
+- M5 candles cached in AsyncStorage (`fibo_m5_candles_v1`) — for instant chart render
+- On startup: cached data loads first, then WebSocket updates in background
+- Loading pill badge shows "M15: X/200" when data streaming in
+- Market transitions (open/close) keep cached candles visible instead of clearing
+
+## Build APK (Android Production)
+- Package name: `com.fibotrader.app`
+- EAS config: `eas.json` — all profiles use `buildType: "apk"` (not AAB)
+- See BUILD GUIDE section in replit.md for full commands
+
+## Build Guide — Produksi APK
+
+### 1. Install EAS CLI
+```
+npm install -g eas-cli
+```
+
+### 2. Login ke Expo Account
+```
+eas login
+```
+Masukkan username/email dan password akun expo.dev kamu.
+
+### 3. Link project ke EAS (pertama kali saja)
+```
+eas init
+```
+
+### 4. Build APK Production (Upload ke cloud EAS)
+```
+eas build --platform android --profile production
+```
+
+### 5. Build APK Lokal (tanpa upload, butuh Android SDK)
+```
+eas build --platform android --profile production --local
+```
+
+### 6. Download APK
+Setelah build selesai, EAS akan berikan link download APK-nya.
+Atau cek di: https://expo.dev/accounts/[username]/projects/fibotrader/builds
+
+### Notes:
+- `production` profile = APK siap install langsung di HP
+- Tidak perlu Google Play — APK langsung install (Enable "Install from unknown sources" di Android)
+- Build cloud gratis 30 build/bulan di Expo free tier
+
 ## Workflows
 - **Start Backend**: `npm run server:dev` (port 5000)
 - **Start Frontend**: `npm run expo:dev` (port 8081)

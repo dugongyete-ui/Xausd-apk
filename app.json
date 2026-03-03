@@ -1,11 +1,11 @@
 {
   "expo": {
     "name": "FiboTrader",
-    "slug": "my-app",
+    "slug": "fibotrader",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "myapp",
+    "scheme": "fibotrader",
     "userInterfaceStyle": "dark",
     "newArchEnabled": true,
     "splash": {
@@ -15,10 +15,10 @@
     },
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.myapp"
+      "bundleIdentifier": "com.fibotrader.app"
     },
     "android": {
-      "package": "com.myapp",
+      "package": "com.fibotrader.app",
       "adaptiveIcon": {
         "backgroundColor": "#0A0E17",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
