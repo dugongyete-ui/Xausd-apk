@@ -1,0 +1,254 @@
+
+ 
+Bangun sistem trading otomatis berbasis Fibonacci retracement dengan entry di zona 61.8%–78.6% menggunakan data real-time dari Deriv WebSocket:
+ `wss://ws.derivws.com/websockets/v3?app_id=114791 ` 
+Pair yang digunakan: **XAUUSD**
+ 
+Strategi harus deterministic, tidak boleh random, tidak boleh asumsi visual, semua berbasis perhitungan matematis.
+  
+# 1️⃣ DATA SOURCE (MANDATORY)
+ 
+Gunakan WebSocket Deriv.
+ 
+Subscribe ke:
+ 
+ 
+- ticks untuk harga real-time
+ 
+- atau candles (OHLC) timeframe M5
+ 
+
+ 
+Gunakan timeframe:
+ `Granularity: 300 (M5) ` 
+Pastikan sistem:
+ 
+ 
+- Reconnect otomatis jika koneksi terputus
+ 
+- Validasi data tidak null
+ 
+- Buffer minimal 200 candle terakhir
+ 
+
+  
+# 2️⃣ TREND DETECTION (WAJIB ADA)
+ 
+Gunakan:
+ 
+ 
+- EMA 50
+ 
+- EMA 200
+ 
+
+ 
+Rumus EMA standar.
+ 
+Definisi trend:
+ 
+### Bullish Trend
+ 
+Harga close terakhir > EMA 200 EMA 50 > EMA 200
+ 
+### Bearish Trend
+ 
+Harga close terakhir < EMA 200 EMA 50 < EMA 200
+ 
+Jika tidak memenuhi kondisi di atas → NO TRADE.
+  
+# 3️⃣ SWING DETECTION (WAJIB OBJEKTIF)
+ 
+Gunakan metode fractal sederhana:
+ 
+Swing High: Candle dengan high lebih tinggi dari 2 candle kiri dan 2 candle kanan.
+ 
+Swing Low: Candle dengan low lebih rendah dari 2 candle kiri dan 2 candle kanan.
+ 
+Ambil swing terakhir yang valid sesuai arah trend.
+  
+# 4️⃣ FIBONACCI CALCULATION
+ 
+Jika Bullish Trend:
+ 
+Tarik dari: Swing Low → Swing High terakhir
+ 
+Jika Bearish Trend:
+ 
+Tarik dari: Swing High → Swing Low terakhir
+ 
+Hitung level berikut:
+ 
+ 
+- 61.8%
+ 
+- 78.6%
+ 
+- -27%
+ 
+
+ 
+Rumus retracement:
+ 
+Untuk bullish:
+ `Level = High - (High - Low) * Ratio ` 
+Untuk bearish:
+ `Level = Low + (High - Low) * Ratio ` 
+Untuk -27% extension bullish:
+ `Extension = High + (High - Low) * 0.27 ` 
+Untuk bearish:
+ `Extension = Low - (High - Low) * 0.27 `  
+# 5️⃣ ENTRY RULE (ZONA 61.8%–78.6%)
+ 
+Entry hanya valid jika:
+ 
+Harga masuk ke area antara:
+ `61.8% ≤ price ≤ 78.6% ` 
+Tambahkan konfirmasi candle:
+ 
+### Untuk BUY:
+ 
+ 
+- Candle close bullish
+ 
+- Lower wick lebih panjang dari body
+ 
+
+ 
+### Untuk SELL:
+ 
+ 
+- Candle close bearish
+ 
+- Upper wick lebih panjang dari body
+ 
+
+ 
+Tanpa konfirmasi candle → NO SIGNAL.
+  
+# 6️⃣ STOP LOSS LOGIC
+ 
+Stop Loss tidak boleh tepat di 78.6%.
+ 
+Gunakan buffer ATR.
+ 
+Hitung ATR(14).
+ 
+Stop Loss:
+ 
+BUY:
+ `SL = 78.6% - (0.5 × ATR) ` 
+SELL:
+ `SL = 78.6% + (0.5 × ATR) `  
+# 7️⃣ TAKE PROFIT LOGIC
+ 
+Target selalu:
+ `-27% Fibonacci extension `  
+# 8️⃣ RISK MANAGEMENT
+ 
+Risk per trade maksimal 1% dari balance.
+ 
+Position sizing harus dihitung otomatis:
+ `Lot = (1% × Balance) / (Entry - SL) ` 
+Jika SL distance terlalu kecil (< spread × 3) → reject trade.
+  
+# 9️⃣ TRADE FILTERS
+ 
+WAJIB ADA:
+ 
+ 
+- Maksimal 1 trade aktif per waktu
+ 
+- Jangan entry jika sudah ada posisi aktif
+ 
+- Hindari entry jika ATR terlalu kecil (low volatility)
+ 
+- Hindari entry jika candle spread ekstrem
+ 
+
+  
+# 🔟 SIGNAL STRUCTURE OUTPUT
+ 
+Setiap sinyal harus mengandung:
+ 
+ 
+- Pair: XAUUSD
+ 
+- Timeframe: M5
+ 
+- Trend: Bullish / Bearish
+ 
+- Entry Price
+ 
+- Stop Loss
+ 
+- Take Profit
+ 
+- Risk Reward Ratio
+ 
+- Timestamp UTC
+ 
+
+ 
+Format output harus konsisten dan tidak berubah-ubah.
+  
+# 1️⃣1️⃣ ERROR HANDLING
+ 
+WAJIB:
+ 
+ 
+- Reconnect otomatis jika WebSocket terputus
+ 
+- Log semua error
+ 
+- Simpan semua sinyal ke database atau file log
+ 
+- Validasi semua angka sebelum eksekusi
+ 
+
+  
+# 1️⃣2️⃣ PRODUCTION REQUIREMENTS
+ 
+Sistem harus:
+ 
+ 
+- Stabil
+ 
+- Tidak blocking
+ 
+- Async WebSocket handling
+ 
+- Memory usage efisien
+ 
+- Tidak menggunakan random
+ 
+- Tidak menggunakan asumsi visual
+ 
+- Semua keputusan berbasis data numerik
+ 
+
+  
+# 1️⃣3️⃣ FINAL VALIDATION RULE
+ 
+Signal hanya dikirim jika:
+ 
+ 
+- Trend valid
+ 
+- Swing valid
+ 
+- Fibonacci valid
+ 
+- Harga masuk zona 61.8–78.6
+ 
+- Ada konfirmasi candle
+ 
+- Risk management valid
+ 
+
+ 
+Jika salah satu gagal → NO SIGNAL.
+  
+# END OF STRATEGY SPECIFICATION
+ 
+Implementasikan sesuai spesifikasi ini tanpa improvisasi tambahan.
