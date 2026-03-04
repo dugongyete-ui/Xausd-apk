@@ -153,23 +153,31 @@ export function FibChart() {
   const { lo, hi } = useMemo(() => {
     let loV = visibleCandles.length > 0 ? Math.min(...visibleCandles.map((c) => c.low)) : 3200;
     let hiV = visibleCandles.length > 0 ? Math.max(...visibleCandles.map((c) => c.high)) : 3300;
+    // Only include Fibonacci ZONE levels (not swingHigh/swingLow/extension)
+    // so distant swings don't crush the candles
     if (fibLevels) {
-      loV = Math.min(loV, fibLevels.swingLow, fibLevels.extensionNeg27);
-      hiV = Math.max(hiV, fibLevels.swingHigh);
+      loV = Math.min(loV, fibLevels.level618, fibLevels.level786);
+      hiV = Math.max(hiV, fibLevels.level618, fibLevels.level786);
     }
     if (currentSignal) {
-      loV = Math.min(loV, currentSignal.stopLoss, currentSignal.takeProfit);
-      hiV = Math.max(hiV, currentSignal.stopLoss, currentSignal.takeProfit);
+      loV = Math.min(loV, currentSignal.entryPrice);
+      hiV = Math.max(hiV, currentSignal.entryPrice);
     }
+    const candleRange = hiV - loV;
+    // Clamp EMA lines: only include if within 3× candle range of current view
     if (selectedTF === "M5" && m15Ema50Val) {
-      loV = Math.min(loV, m15Ema50Val);
-      hiV = Math.max(hiV, m15Ema50Val);
+      if (Math.abs(m15Ema50Val - (loV + hiV) / 2) < candleRange * 3) {
+        loV = Math.min(loV, m15Ema50Val);
+        hiV = Math.max(hiV, m15Ema50Val);
+      }
     }
     if (selectedTF === "M5" && m15Ema200Val) {
-      loV = Math.min(loV, m15Ema200Val);
-      hiV = Math.max(hiV, m15Ema200Val);
+      if (Math.abs(m15Ema200Val - (loV + hiV) / 2) < candleRange * 3) {
+        loV = Math.min(loV, m15Ema200Val);
+        hiV = Math.max(hiV, m15Ema200Val);
+      }
     }
-    const pad = (hiV - loV) * 0.10;
+    const pad = (hiV - loV) * 0.12;
     return { lo: loV - pad, hi: hiV + pad };
   }, [visibleCandles, fibLevels, currentSignal, selectedTF, m15Ema50Val, m15Ema200Val]);
 
@@ -268,8 +276,8 @@ export function FibChart() {
               {(zoneY2 - zoneY1) > 14 && (
                 <G>
                   <Rect x={plotW / 2 - 45} y={(zoneY1 + zoneY2) / 2 - 8} width={90} height={14} fill="#0A0E17" opacity={0.65} rx={4} />
-                  <SvgText x={plotW / 2} y={(zoneY1 + zoneY2) / 2 + 4} fill={C.gold} fontSize={8.5} fontWeight="bold" textAnchor="middle">
-                    ZONA ENTRY (61.8–78.6%)
+                  <SvgText x={plotW / 2} y={(zoneY1 + zoneY2) / 2 + 4} fill={trend === "Bullish" ? C.green : C.red} fontSize={8.5} fontWeight="bold" textAnchor="middle">
+                    {trend === "Bullish" ? "▲ ZONA BUY (61.8–78.6%)" : "▼ ZONA SELL (61.8–78.6%)"}
                   </SvgText>
                 </G>
               )}

@@ -166,28 +166,57 @@ function calcATR(candles: Candle[], period: number): number {
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
-function findSwingHigh(candles: Candle[]): number | null {
-  for (let i = candles.length - 3; i >= 2; i--) {
-    const c = candles[i];
-    if (
-      c.high > candles[i - 1].high &&
-      c.high > candles[i - 2].high &&
-      c.high > candles[i + 1].high &&
-      c.high > candles[i + 2].high
-    ) return c.high;
-  }
-  return null;
-}
+// Find swing high/low pair for Fibonacci retracement using fractal pivots.
+// BEARISH: scan backwards for the most recent fractal HIGH, then take the
+//          lowest absolute low AFTER it — ensuring HIGH→LOW temporal order.
+// BULLISH: scan backwards for the most recent fractal LOW, then take the
+//          highest absolute high AFTER it — ensuring LOW→HIGH temporal order.
+// Using fractal pivots (not absolute extremes) keeps the range tight and fresh.
+function findSwings(
+  candles: Candle[],
+  trend: "Bullish" | "Bearish"
+): { swingHigh: number; swingLow: number } | null {
+  const LOOKBACK = Math.min(candles.length, 100);
+  const slice = candles.slice(-LOOKBACK);
+  const n = slice.length;
+  if (n < 10) return null;
 
-function findSwingLow(candles: Candle[]): number | null {
-  for (let i = candles.length - 3; i >= 2; i--) {
-    const c = candles[i];
-    if (
-      c.low < candles[i - 1].low &&
-      c.low < candles[i - 2].low &&
-      c.low < candles[i + 1].low &&
-      c.low < candles[i + 2].low
-    ) return c.low;
+  if (trend === "Bearish") {
+    // Scan backwards: find most recent 5-bar fractal HIGH, then lowest low after it
+    for (let i = n - 3; i >= 4; i--) {
+      const c = slice[i];
+      if (
+        c.high > slice[i - 1].high && c.high > slice[i - 2].high &&
+        c.high > slice[i + 1].high && c.high > slice[i + 2].high
+      ) {
+        let lowestLow = Infinity;
+        for (let j = i + 1; j < n; j++) {
+          if (slice[j].low < lowestLow) lowestLow = slice[j].low;
+        }
+        if (lowestLow === Infinity || lowestLow >= c.high) continue;
+        const range = c.high - lowestLow;
+        if (range < 5) continue;
+        return { swingHigh: c.high, swingLow: lowestLow };
+      }
+    }
+  } else {
+    // Bullish: scan backwards for most recent 5-bar fractal LOW, then highest high after it
+    for (let i = n - 3; i >= 4; i--) {
+      const c = slice[i];
+      if (
+        c.low < slice[i - 1].low && c.low < slice[i - 2].low &&
+        c.low < slice[i + 1].low && c.low < slice[i + 2].low
+      ) {
+        let highestHigh = -Infinity;
+        for (let j = i + 1; j < n; j++) {
+          if (slice[j].high > highestHigh) highestHigh = slice[j].high;
+        }
+        if (highestHigh === -Infinity || highestHigh <= c.low) continue;
+        const range = highestHigh - c.low;
+        if (range < 5) continue;
+        return { swingHigh: highestHigh, swingLow: c.low };
+      }
+    }
   }
   return null;
 }
@@ -584,13 +613,12 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return calcATR(m15Candles, ATR_PERIOD);
   }, [m15Candles]);
 
-  // Fibonacci levels from M15 swings
+  // Fibonacci levels from M15 swings — uses trend-aware swing detection
   const fibLevels = useMemo((): FibLevels | null => {
     if (trend === "Loading" || trend === "No Trade") return null;
-    const swingHigh = findSwingHigh(m15Candles);
-    const swingLow = findSwingLow(m15Candles);
-    if (swingHigh === null || swingLow === null || swingHigh <= swingLow) return null;
-    return calcFib(swingHigh, swingLow, trend);
+    const swings = findSwings(m15Candles, trend);
+    if (!swings) return null;
+    return calcFib(swings.swingHigh, swings.swingLow, trend);
   }, [m15Candles, trend]);
 
   // Is current M5 price inside M15 Fibonacci zone?
