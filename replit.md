@@ -47,7 +47,7 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 | `contexts/TradingContext.tsx` | Core trading engine: WebSocket, EMA, ATR, Fibonacci, signals |
 | `app/(tabs)/index.tsx` | Dashboard: live price, trend, Fibonacci levels, active signal |
 | `app/(tabs)/signals.tsx` | Signal history list with full signal details |
-| `app/(tabs)/settings.tsx` | Balance input, risk params, strategy reference |
+| `app/(tabs)/settings.tsx` | Balance input, risk params, TEST SINYAL VISUAL buttons, strategy reference |
 | `app/(tabs)/_layout.tsx` | Tab navigation (NativeTabs for iOS 26 liquid glass, Tabs fallback) |
 | `constants/colors.ts` | Design token colors |
 | `components/FibChart.tsx` | Interactive chart with M5/M15 timeframe selector |
@@ -60,16 +60,23 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 - Bullish: close > EMA200 AND EMA50 > EMA200
 - Bearish: close < EMA200 AND EMA50 < EMA200 → Fibonacci drawn High→Low
 - Otherwise: No Trade — Fibonacci NOT generated
-### 3. Swing Detection (SWING VALIDATION RULE): Strict 5-bar fractal on M15
-- Swing High valid: High[i] > High[i-1] & High[i-2] AND High[i] > High[i+1] & High[i+2]
-- Swing Low valid: Low[i] < Low[i-1] & Low[i-2] AND Low[i] < Low[i+1] & Low[i+2]
-- Uses LATEST swing ALIGNED with EMA trend direction
+### 3. Swing Detection (SWING VALIDATION RULE): Hybrid fractal + local extreme on M15
+- **ANCHOR** = latest 5-bar fractal (EMA-aligned, closed candles only, no repaint)
+  - Bearish anchor: fractal HIGH (High[i] > 4 neighbors, EMA50 < EMA200 at candle i)
+  - Bullish anchor: fractal LOW (Low[i] < 4 neighbors, EMA50 > EMA200 at candle i)
+- **PAIR EXTREME** = most recent local trough/peak before the anchor (not fractal-required)
+  - Bearish: most recent 3-bar local LOW before anchor = origin of the rally to that high
+  - Bullish: most recent 3-bar local HIGH before anchor = origin of the drop to that low
+  - Fallback: min/max in 20 candles if no local extreme found
+- Fibonacci updates when EITHER anchor changes (new fractal) OR pair extreme moves (market makes new extreme)
+- Signal lock resets only on anchor change — NOT on pair extreme changes
 ### 4. Fibonacci Calculation (FIBONACCI STABILITY RULE):
-- Zones are STATIC — only recalculate when a new M15 swing forms
-- Bearish: High → Low (retracement zone above current price)
-- Bullish: Low → High (retracement zone below current price)
+- Anchor is locked to fractal epoch — stable, no repaint
+- Pair extreme updates responsively when market makes new highs/lows
+- Bearish: draws from pair low UP to fractal high; zone (61.8%, 78.6%) is near the high
+- Bullish: draws from fractal low UP to pair high; zone is near the high
 - Levels: 61.8%, 78.6%, -27% extension
-- Fibonacci does NOT update every candle — tracked via lastSwingRef
+- Tracked via `lastSwingRef` (stores anchorEpoch + trend + pairValue)
 ### 5. Entry (ENTRY VALIDATION RULE on M5):
 - Zone check: uses CLOSED M5 candle (not live price) — prevents false blocks
 - SELL: closedM5.high >= zone_lo + bearish close + upper wick >= 1.5x body + body in lower half

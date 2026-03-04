@@ -9,7 +9,7 @@ import C from "@/constants/colors";
 
 function NativeTabLayout() {
   return (
-    <NativeTabs screenOptions={{ headerShown: false }}>
+    <NativeTabs>
       <NativeTabs.Trigger name="index">
         <Icon sf={{ default: "chart.line.uptrend.xyaxis", selected: "chart.line.uptrend.xyaxis" }} />
         <Label>Dashboard</Label>

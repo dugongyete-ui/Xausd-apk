@@ -388,8 +388,8 @@ function parseCandle(c: { open: string; high: string; low: string; close: string
 // ─── Deriv Service ────────────────────────────────────────────────────────────
 class DerivService {
   private ws: WebSocket | null = null;
-  private reconnectTimer: NodeJS.Timeout | null = null;
-  private marketCheckTimer: NodeJS.Timeout | null = null;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private marketCheckTimer: ReturnType<typeof setInterval> | null = null;
 
   private m15Candles: Candle[] = [];
   private m5Candles: Candle[] = [];
@@ -554,7 +554,7 @@ class DerivService {
       }
     });
 
-    ws.on("error", (err) => {
+    ws.on("error", (err: Error) => {
       console.error("[DerivService] WS error:", err.message);
       this.connectionStatus = "disconnected";
     });
