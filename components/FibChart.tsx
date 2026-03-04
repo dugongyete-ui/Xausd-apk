@@ -189,14 +189,17 @@ export function FibChart() {
     let loV = Math.min(...visibleCandles.map((c) => c.low));
     let hiV = Math.max(...visibleCandles.map((c) => c.high));
 
-    // Only include fib zone if price is close to it (within 2× visible range)
+    // Only include fib zone if it is very close to the candle range.
+    // Max expansion: 1× the current candle height — prevents zone far below/above
+    // from squishing candles. Lines outside this view are clipped by FibLine.
     if (fibLevels) {
-      const vRange = hiV - loV;
-      const midV = (loV + hiV) / 2;
+      const candleH = hiV - loV;
       const zoneHi = Math.max(fibLevels.level618, fibLevels.level786);
       const zoneLo = Math.min(fibLevels.level618, fibLevels.level786);
-      if (Math.abs(zoneHi - midV) < vRange * 2.5) hiV = Math.max(hiV, zoneHi);
-      if (Math.abs(zoneLo - midV) < vRange * 2.5) loV = Math.min(loV, zoneLo);
+      // Only pull chart UP if zone top is above candles but within 1× candle height
+      if (zoneHi > hiV && zoneHi - hiV < candleH) hiV = zoneHi;
+      // Only pull chart DOWN if zone bottom is below candles but within 1× candle height
+      if (zoneLo < loV && loV - zoneLo < candleH) loV = zoneLo;
     }
 
     // Current price must always be in view

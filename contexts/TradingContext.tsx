@@ -229,11 +229,11 @@ function calcATR(candles: Candle[], period: number): number {
 //   Ini mencegah repaint: anchor tidak berubah selama candle masih live.
 //
 // PAIR EXTREME (ujung range Fibonacci):
-//   Bearish → SwingLow  = LOW TERKECIL dalam 80 candle SEBELUM anchor
-//   Bullish → SwingHigh = HIGH TERBESAR dalam 80 candle SEBELUM anchor
-//   Tidak perlu fractal — cukup extreme price aktual.
-//   Ini membuat Fibonacci responsif: ketika market cetak low baru,
-//   SwingLow langsung update dan zona Fib bergeser.
+//   Bearish → SwingLow  = LOW TERKECIL (absolute minimum) dalam PAIR_LOOKBACK candle SEBELUM anchor
+//   Bullish → SwingHigh = HIGH TERBESAR (absolute maximum) dalam PAIR_LOOKBACK candle SEBELUM anchor
+//   Menggunakan absolute extreme (bukan hanya local fractal) supaya Fibonacci
+//   benar-benar merentang dari titik terendah ke tertinggi dari impulse move.
+//   Minimum range: 5 points — filter noise/sideways kecil.
 //
 // anchorEpoch = epoch candle fractal → kunci non-repaint anchor.
 function findSwings(
@@ -264,25 +264,14 @@ function findSwings(
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 >= e200) continue;
 
-      // SwingLow = local trough terbaru sebelum anchor (asal impulse naik ke fractal high ini).
-      // Cari 3-bar local low dari dekat anchor ke belakang; fallback ke min 20 candle.
-      const searchStart = Math.max(1, i - PAIR_LOOKBACK);
-      let swingLow: number | null = null;
-      for (let j = i - 1; j >= searchStart; j--) {
-        const prevLow = j > 0 ? slice[j - 1].low : slice[j].low;
-        const nextLow = slice[j + 1].low;
-        if (slice[j].low <= prevLow && slice[j].low <= nextLow) {
-          swingLow = slice[j].low;
-          break;
-        }
+      // SwingLow = LOW TERKECIL (absolute minimum) dalam PAIR_LOOKBACK candle sebelum anchor.
+      // Absolute extreme supaya Fibonacci merentang full range dari impulse move.
+      const searchStart = Math.max(0, i - PAIR_LOOKBACK);
+      let swingLow = Infinity;
+      for (let j = searchStart; j < i; j++) {
+        if (slice[j].low < swingLow) swingLow = slice[j].low;
       }
-      if (swingLow === null) {
-        const fb = Math.max(0, i - 20);
-        let mn = Infinity;
-        for (let j = fb; j < i; j++) if (slice[j].low < mn) mn = slice[j].low;
-        if (mn !== Infinity) swingLow = mn;
-      }
-      if (swingLow === null) continue;
+      if (!isFinite(swingLow)) continue;
       if (c.high - swingLow < 5) continue;
 
       return { swingHigh: c.high, swingLow, anchorEpoch: c.epoch };
@@ -300,25 +289,14 @@ function findSwings(
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 <= e200) continue;
 
-      // SwingHigh = local peak terbaru sebelum anchor (asal impulse turun ke fractal low ini).
-      // Cari 3-bar local high dari dekat anchor ke belakang; fallback ke max 20 candle.
-      const searchStart = Math.max(1, i - PAIR_LOOKBACK);
-      let swingHigh: number | null = null;
-      for (let j = i - 1; j >= searchStart; j--) {
-        const prevHigh = j > 0 ? slice[j - 1].high : slice[j].high;
-        const nextHigh = slice[j + 1].high;
-        if (slice[j].high >= prevHigh && slice[j].high >= nextHigh) {
-          swingHigh = slice[j].high;
-          break;
-        }
+      // SwingHigh = HIGH TERBESAR (absolute maximum) dalam PAIR_LOOKBACK candle sebelum anchor.
+      // Absolute extreme supaya Fibonacci merentang full range dari impulse move.
+      const searchStart = Math.max(0, i - PAIR_LOOKBACK);
+      let swingHigh = -Infinity;
+      for (let j = searchStart; j < i; j++) {
+        if (slice[j].high > swingHigh) swingHigh = slice[j].high;
       }
-      if (swingHigh === null) {
-        const fb = Math.max(0, i - 20);
-        let mx = -Infinity;
-        for (let j = fb; j < i; j++) if (slice[j].high > mx) mx = slice[j].high;
-        if (mx !== -Infinity) swingHigh = mx;
-      }
-      if (swingHigh === null) continue;
+      if (!isFinite(swingHigh)) continue;
       if (swingHigh - c.low < 5) continue;
 
       return { swingHigh, swingLow: c.low, anchorEpoch: c.epoch };
