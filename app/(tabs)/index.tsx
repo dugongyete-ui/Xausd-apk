@@ -13,6 +13,100 @@ import C from "@/constants/colors";
 import { useTrading, TrendState } from "@/contexts/TradingContext";
 import { FibChart } from "@/components/FibChart";
 
+// ─── Live Clock ───────────────────────────────────────────────────────────────
+function LiveClock() {
+  const [now, setNow] = React.useState(new Date());
+
+  useEffect(() => {
+    const timer = setInterval(() => setNow(new Date()), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
+  const pad = (n: number) => String(n).padStart(2, "0");
+
+  // Waktu lokal
+  const hh = pad(now.getHours());
+  const mm = pad(now.getMinutes());
+  const ss = pad(now.getSeconds());
+
+  // Tanggal
+  const days = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
+  const months = ["Jan","Feb","Mar","Apr","Mei","Jun","Jul","Agu","Sep","Okt","Nov","Des"];
+  const dayName = days[now.getDay()];
+  const dateStr = `${dayName}, ${now.getDate()} ${months[now.getMonth()]} ${now.getFullYear()}`;
+
+  // UTC time
+  const utcHH = pad(now.getUTCHours());
+  const utcMM = pad(now.getUTCMinutes());
+
+  return (
+    <View style={clockStyles.wrapper}>
+      {/* Jam digital utama */}
+      <View style={clockStyles.timeRow}>
+        <Text style={clockStyles.hhmm}>{hh}:{mm}</Text>
+        <Text style={clockStyles.ss}>{ss}</Text>
+      </View>
+      {/* Tanggal */}
+      <Text style={clockStyles.date}>{dateStr}</Text>
+      {/* UTC */}
+      <View style={clockStyles.utcRow}>
+        <View style={clockStyles.utcDot} />
+        <Text style={clockStyles.utc}>UTC {utcHH}:{utcMM}</Text>
+      </View>
+    </View>
+  );
+}
+
+const clockStyles = StyleSheet.create({
+  wrapper: {
+    alignItems: "flex-end",
+  },
+  timeRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 2,
+  },
+  hhmm: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 26,
+    color: C.text,
+    letterSpacing: -0.5,
+    lineHeight: 30,
+  },
+  ss: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 13,
+    color: C.textSub,
+    lineHeight: 20,
+    marginBottom: 1,
+    letterSpacing: 0.5,
+  },
+  date: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 10,
+    color: C.textDim,
+    marginTop: 1,
+  },
+  utcRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    marginTop: 2,
+  },
+  utcDot: {
+    width: 5,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: C.gold,
+  },
+  utc: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 9,
+    color: C.gold,
+    letterSpacing: 0.8,
+  },
+});
+
 function PulseDot({ color }: { color: string }) {
   const anim = useRef(new Animated.Value(1)).current;
   useEffect(() => {
@@ -465,11 +559,14 @@ export default function DashboardScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.header}>
-          <View>
-            <Text style={styles.headerTitle}>LIBARTIN</Text>
-            <Text style={styles.headerSub}>Fibonacci Analysis · XAUUSD</Text>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 10 }}>
+            <MaterialCommunityIcons name="finance" size={24} color={C.gold} />
+            <View>
+              <Text style={styles.headerTitle}>LIBARTIN</Text>
+              <Text style={styles.headerSub}>Fibonacci Analysis · XAUUSD</Text>
+            </View>
           </View>
-          <MaterialCommunityIcons name="finance" size={28} color={C.gold} />
+          <LiveClock />
         </View>
 
         <MarketClosedBanner />
