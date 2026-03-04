@@ -215,38 +215,73 @@ function FibLevelsCard() {
     return null;
   }
 
-  const levels = [
-    {
-      label: "Swing High",
-      value: fibLevels.swingHigh,
-      color: C.green,
-      pct: "100%",
-    },
-    {
-      label: "61.8% Zone",
-      value: fibLevels.level618,
-      color: C.gold,
-      pct: "61.8%",
-    },
-    {
-      label: "78.6% Zone",
-      value: fibLevels.level786,
-      color: C.gold,
-      pct: "78.6%",
-    },
-    {
-      label: "Swing Low",
-      value: fibLevels.swingLow,
-      color: C.red,
-      pct: "0%",
-    },
-    {
-      label: "-27% Referensi",
-      value: fibLevels.extensionNeg27,
-      color: C.blue,
-      pct: "-27%",
-    },
-  ];
+  const isBull = trend === "Bullish";
+
+  const levels = isBull
+    ? [
+        {
+          label: "0.0% · Swing High (Resistance)",
+          value: fibLevels.swingHigh,
+          color: C.green,
+          pct: "0.0%",
+        },
+        {
+          label: "61.8% · Golden Retracement",
+          value: fibLevels.level618,
+          color: C.gold,
+          pct: "61.8%",
+        },
+        {
+          label: "78.6% · Deep Retracement",
+          value: fibLevels.level786,
+          color: "#FBBF24",
+          pct: "78.6%",
+        },
+        {
+          label: "100% · Swing Low (SL Ref)",
+          value: fibLevels.swingLow,
+          color: C.red,
+          pct: "100%",
+        },
+        {
+          label: "-27% Extension (Take Profit)",
+          value: fibLevels.extensionNeg27,
+          color: C.blue,
+          pct: "-27%",
+        },
+      ]
+    : [
+        {
+          label: "0.0% · Swing Low (Support)",
+          value: fibLevels.swingLow,
+          color: C.red,
+          pct: "0.0%",
+        },
+        {
+          label: "61.8% · Golden Retracement",
+          value: fibLevels.level618,
+          color: C.gold,
+          pct: "61.8%",
+        },
+        {
+          label: "78.6% · Deep Retracement",
+          value: fibLevels.level786,
+          color: "#FBBF24",
+          pct: "78.6%",
+        },
+        {
+          label: "100% · Swing High (SL Ref)",
+          value: fibLevels.swingHigh,
+          color: C.green,
+          pct: "100%",
+        },
+        {
+          label: "-27% Extension (Take Profit)",
+          value: fibLevels.extensionNeg27,
+          color: C.blue,
+          pct: "-27%",
+        },
+      ];
 
   return (
     <View style={styles.section}>

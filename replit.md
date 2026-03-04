@@ -3,6 +3,18 @@
 ## Project Overview
 A professional mobile trading analysis app built with Expo (React Native) that performs real-time Fibonacci retracement analysis on XAUUSD (Gold/USD) using live data from Deriv WebSocket. All trading decisions are purely mathematical — no random, no visual assumptions.
 
+## Strategy: Deep Pullback Continuation
+- **Analysis Timeframe**: M15 (structure, EMA, swing detection, Fibonacci)
+- **Execution Timeframe**: M5 (entry confirmation — rejection or engulfing)
+- **Golden Zone**: 61.8%–78.6% retracement
+- **Target**: -27% Extension beyond swing extreme
+- **Fibonacci Structure**:
+  - 0.0% = Swing High (Resistance) for Bullish / Swing Low (Support) for Bearish
+  - 61.8% = Golden Retracement Level (Primary Entry Zone)
+  - 78.6% = Deep Retracement Level (Final Defense Zone)
+  - 100% = Swing Low/High (SL Reference)
+  - -27% = Extension Take Profit Target
+
 ## Architecture
 
 ### Frontend (Expo / React Native)

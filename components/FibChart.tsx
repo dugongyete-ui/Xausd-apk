@@ -14,20 +14,21 @@ import Svg, {
 import C from "@/constants/colors";
 import { useTrading, calcEMAFull } from "@/contexts/TradingContext";
 
-const CHART_HEIGHT = 320;
-const RIGHT_W = 58;
-const TOP_PAD = 14;
-const BOT_PAD = 14;
-const VISIBLE_CANDLES = 40;
+const CHART_HEIGHT = 400;
+const RIGHT_W = 62;
+const TOP_PAD = 16;
+const BOT_PAD = 16;
 
-type TF = "M5" | "M15";
+type TF = "M15" | "M5";
+
+const VISIBLE: Record<TF, number> = { M15: 30, M5: 40 };
 
 function priceToY(p: number, lo: number, hi: number, plotH: number): number {
   if (hi === lo) return plotH / 2;
   return TOP_PAD + ((hi - p) / (hi - lo)) * plotH;
 }
 
-function dashes(x1: number, y: number, x2: number, dash = 5, gap = 3): string {
+function dashedPath(x1: number, y: number, x2: number, dash = 5, gap = 3): string {
   let d = "";
   let x = x1;
   let on = true;
@@ -40,9 +41,8 @@ function dashes(x1: number, y: number, x2: number, dash = 5, gap = 3): string {
   return d;
 }
 
-interface LabeledLineProps {
+interface FibLineProps {
   label: string;
-  sublabel?: string;
   price: number;
   color: string;
   lo: number;
@@ -51,12 +51,11 @@ interface LabeledLineProps {
   plotW: number;
   dashed?: boolean;
   strokeWidth?: number;
-  showArrow?: "up" | "down";
-  labelOffset?: number;
+  labelSide?: "left" | "right";
 }
-function LabeledLine({
+
+function FibLine({
   label,
-  sublabel,
   price,
   color,
   lo,
@@ -65,37 +64,59 @@ function LabeledLine({
   plotW,
   dashed = true,
   strokeWidth = 1,
-  showArrow,
-  labelOffset = 0,
-}: LabeledLineProps) {
+  labelSide = "left",
+}: FibLineProps) {
   const y = priceToY(price, lo, hi, plotH);
-  if (y < TOP_PAD - 4 || y > TOP_PAD + plotH + 4) return null;
-  const ly = y + labelOffset;
+  if (y < TOP_PAD - 6 || y > TOP_PAD + plotH + 6) return null;
+
+  const labelW = Math.min(label.length * 5.5 + 8, plotW - 4);
+  const lx = labelSide === "left" ? 2 : plotW - labelW - 4;
+
   return (
     <G>
       {dashed ? (
-        <Path d={dashes(0, y, plotW - 1)} stroke={color} strokeWidth={strokeWidth} opacity={0.75} />
+        <Path
+          d={dashedPath(0, y, plotW - 1)}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          opacity={0.8}
+        />
       ) : (
-        <Line x1={0} y1={y} x2={plotW - 1} y2={y} stroke={color} strokeWidth={strokeWidth} opacity={0.9} />
-      )}
-      {showArrow === "up" && (
-        <Polygon
-          points={`${plotW - 16},${y + 6} ${plotW - 10},${y - 2} ${plotW - 4},${y + 6}`}
-          fill={color} opacity={0.95}
+        <Line
+          x1={0}
+          y1={y}
+          x2={plotW - 1}
+          y2={y}
+          stroke={color}
+          strokeWidth={strokeWidth}
+          opacity={0.95}
         />
       )}
-      {showArrow === "down" && (
-        <Polygon
-          points={`${plotW - 16},${y - 6} ${plotW - 10},${y + 2} ${plotW - 4},${y - 6}`}
-          fill={color} opacity={0.95}
-        />
-      )}
-      <Rect x={2} y={ly - 9} width={sublabel ? 82 : 72} height={sublabel ? 20 : 12} fill="#0A0E17" opacity={0.72} rx={3} />
-      <SvgText x={5} y={ly} fill={color} fontSize={8.5} fontWeight="bold">{label}</SvgText>
-      {sublabel && (
-        <SvgText x={5} y={ly + 9} fill={color} fontSize={7} opacity={0.75}>{sublabel}</SvgText>
-      )}
-      <SvgText x={plotW + 2} y={y + 4} fill={color} fontSize={8} fontWeight="bold">
+      <Rect
+        x={lx}
+        y={y - 9}
+        width={labelW}
+        height={13}
+        fill="#0A0E17"
+        opacity={0.78}
+        rx={3}
+      />
+      <SvgText
+        x={lx + 4}
+        y={y + 1}
+        fill={color}
+        fontSize={7.5}
+        fontWeight="bold"
+      >
+        {label}
+      </SvgText>
+      <SvgText
+        x={plotW + 2}
+        y={y + 4}
+        fill={color}
+        fontSize={7.5}
+        fontWeight="bold"
+      >
         {price.toFixed(1)}
       </SvgText>
     </G>
@@ -115,81 +136,74 @@ export function FibChart() {
   const [chartW, setChartW] = useState(0);
   const [selectedTF, setSelectedTF] = useState<TF>("M15");
 
+  const visibleCount = VISIBLE[selectedTF];
+
   const visibleCandles = useMemo(() => {
     const src = selectedTF === "M15" ? m15Candles : candles;
-    return src.length === 0 ? [] : src.slice(-VISIBLE_CANDLES);
-  }, [selectedTF, candles, m15Candles]);
-
-  const ema50FromM15 = useMemo(() => {
-    if (m15Candles.length < 50) return [];
-    return calcEMAFull(m15Candles.map((c) => c.close), 50);
-  }, [m15Candles]);
-
-  const ema200FromM15 = useMemo(() => {
-    if (m15Candles.length < 200) return [];
-    return calcEMAFull(m15Candles.map((c) => c.close), 200);
-  }, [m15Candles]);
+    return src.length === 0 ? [] : src.slice(-visibleCount);
+  }, [selectedTF, candles, m15Candles, visibleCount]);
 
   const ema50Series = useMemo(() => {
-    if (selectedTF === "M15") return ema50FromM15.slice(-VISIBLE_CANDLES);
-    return [];
-  }, [selectedTF, ema50FromM15]);
+    if (selectedTF !== "M15" || m15Candles.length < 50) return [];
+    return calcEMAFull(m15Candles.map((c) => c.close), 50).slice(-visibleCount);
+  }, [selectedTF, m15Candles, visibleCount]);
 
   const ema200Series = useMemo(() => {
-    if (selectedTF === "M15") return ema200FromM15.slice(-VISIBLE_CANDLES);
-    return [];
-  }, [selectedTF, ema200FromM15]);
+    if (selectedTF !== "M15" || m15Candles.length < 200) return [];
+    return calcEMAFull(m15Candles.map((c) => c.close), 200).slice(-visibleCount);
+  }, [selectedTF, m15Candles, visibleCount]);
 
   const m15Ema50Val = useMemo(() => {
-    if (ema50FromM15.length === 0) return null;
-    return ema50FromM15[ema50FromM15.length - 1];
-  }, [ema50FromM15]);
+    if (ema50Series.length === 0) return null;
+    const v = ema50Series[ema50Series.length - 1];
+    return isNaN(v) ? null : v;
+  }, [ema50Series]);
 
   const m15Ema200Val = useMemo(() => {
-    if (ema200FromM15.length === 0) return null;
-    return ema200FromM15[ema200FromM15.length - 1];
-  }, [ema200FromM15]);
+    if (ema200Series.length === 0) return null;
+    const v = ema200Series[ema200Series.length - 1];
+    return isNaN(v) ? null : v;
+  }, [ema200Series]);
 
+  // ── Price range: based purely on visible candles + small padding ──────────
+  // Do NOT expand for fib levels — that squishes candles. Lines outside are clipped.
   const { lo, hi } = useMemo(() => {
-    let loV = visibleCandles.length > 0 ? Math.min(...visibleCandles.map((c) => c.low)) : 3200;
-    let hiV = visibleCandles.length > 0 ? Math.max(...visibleCandles.map((c) => c.high)) : 3300;
-    // Only include Fibonacci ZONE levels (not swingHigh/swingLow/extension)
-    // so distant swings don't crush the candles
+    if (visibleCandles.length === 0) {
+      return { lo: 3200, hi: 3300 };
+    }
+    let loV = Math.min(...visibleCandles.map((c) => c.low));
+    let hiV = Math.max(...visibleCandles.map((c) => c.high));
+
+    // Only include fib zone if price is close to it (within 2× visible range)
     if (fibLevels) {
-      loV = Math.min(loV, fibLevels.level618, fibLevels.level786);
-      hiV = Math.max(hiV, fibLevels.level618, fibLevels.level786);
+      const vRange = hiV - loV;
+      const midV = (loV + hiV) / 2;
+      const zoneHi = Math.max(fibLevels.level618, fibLevels.level786);
+      const zoneLo = Math.min(fibLevels.level618, fibLevels.level786);
+      if (Math.abs(zoneHi - midV) < vRange * 2.5) hiV = Math.max(hiV, zoneHi);
+      if (Math.abs(zoneLo - midV) < vRange * 2.5) loV = Math.min(loV, zoneLo);
     }
-    if (currentSignal) {
-      loV = Math.min(loV, currentSignal.entryPrice);
-      hiV = Math.max(hiV, currentSignal.entryPrice);
+
+    // Current price must always be in view
+    if (currentPrice !== null) {
+      loV = Math.min(loV, currentPrice);
+      hiV = Math.max(hiV, currentPrice);
     }
-    const candleRange = hiV - loV;
-    // Clamp EMA lines: only include if within 3× candle range of current view
-    if (selectedTF === "M5" && m15Ema50Val) {
-      if (Math.abs(m15Ema50Val - (loV + hiV) / 2) < candleRange * 3) {
-        loV = Math.min(loV, m15Ema50Val);
-        hiV = Math.max(hiV, m15Ema50Val);
-      }
-    }
-    if (selectedTF === "M5" && m15Ema200Val) {
-      if (Math.abs(m15Ema200Val - (loV + hiV) / 2) < candleRange * 3) {
-        loV = Math.min(loV, m15Ema200Val);
-        hiV = Math.max(hiV, m15Ema200Val);
-      }
-    }
-    const pad = (hiV - loV) * 0.12;
+
+    const pad = (hiV - loV) * 0.1;
     return { lo: loV - pad, hi: hiV + pad };
-  }, [visibleCandles, fibLevels, currentSignal, selectedTF, m15Ema50Val, m15Ema200Val]);
+  }, [visibleCandles, fibLevels, currentPrice]);
 
   const plotW = chartW - RIGHT_W;
   const plotH = CHART_HEIGHT - TOP_PAD - BOT_PAD;
-  const candleW = visibleCandles.length > 0 ? plotW / visibleCandles.length : 8;
-  const bodyW = Math.max(1, candleW - 1.5);
+  const candleW = visibleCandles.length > 0 ? plotW / visibleCandles.length : 10;
+  const bodyW = Math.max(2, candleW * 0.65);
 
-  function emaPath(series: number[], totalCandles: number): string {
+  function emaPath(series: number[]): string {
+    if (series.length === 0) return "";
     let d = "";
     let started = false;
-    const step = plotW / totalCandles;
+    const step = plotW / series.length;
     for (let i = 0; i < series.length; i++) {
       const v = series[i];
       if (isNaN(v)) { started = false; continue; }
@@ -201,16 +215,22 @@ export function FibChart() {
     return d;
   }
 
-  const zoneY1 = fibLevels ? Math.min(priceToY(fibLevels.level618, lo, hi, plotH), priceToY(fibLevels.level786, lo, hi, plotH)) : null;
-  const zoneY2 = fibLevels ? Math.max(priceToY(fibLevels.level618, lo, hi, plotH), priceToY(fibLevels.level786, lo, hi, plotH)) : null;
+  // Zone (61.8% – 78.6%) highlight coords
+  const zoneYTop = fibLevels
+    ? Math.min(priceToY(fibLevels.level618, lo, hi, plotH), priceToY(fibLevels.level786, lo, hi, plotH))
+    : null;
+  const zoneYBot = fibLevels
+    ? Math.max(priceToY(fibLevels.level618, lo, hi, plotH), priceToY(fibLevels.level786, lo, hi, plotH))
+    : null;
+  const zoneH = zoneYTop !== null && zoneYBot !== null ? zoneYBot - zoneYTop : 0;
 
+  const isBull = trend === "Bullish";
+  const isBear = trend === "Bearish";
   const trendLabel =
-    trend === "Bullish" ? "▲ BULLISH" :
-    trend === "Bearish" ? "▼ BEARISH" :
+    isBull ? "M15 BULLISH ▲" :
+    isBear ? "M15 BEARISH ▼" :
     trend === "Loading" ? `LOADING ${m15Candles.length}/300` : "NO TREND";
-  const trendColor =
-    trend === "Bullish" ? C.green :
-    trend === "Bearish" ? C.red : C.textDim;
+  const trendColor = isBull ? C.green : isBear ? C.red : C.textDim;
 
   const hasNoData = candles.length === 0 && m15Candles.length === 0;
 
@@ -221,17 +241,20 @@ export function FibChart() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <View style={styles.headerLeft}>
-          <Text style={styles.title}>
-            XAUUSD  ·  {selectedTF === "M15" ? "M15 STRUKTUR" : "M5 ENTRY"}
+        <View>
+          <Text style={styles.headerTitle}>XAUUSD · Fibonacci Analysis</Text>
+          <Text style={styles.headerSub}>
+            {selectedTF === "M15" ? "Struktur M15 · Deep Pullback Continuation" : "Eksekusi M5 · Precision Entry"}
           </Text>
         </View>
-        <Text style={[styles.trendLabel, { color: trendColor }]}>{trendLabel}</Text>
+        <View style={[styles.trendPill, { borderColor: trendColor + "50", backgroundColor: trendColor + "15" }]}>
+          <Text style={[styles.trendPillText, { color: trendColor }]}>{trendLabel}</Text>
+        </View>
       </View>
 
       {/* Timeframe Selector */}
       <View style={styles.tfRow}>
-        {(["M5", "M15"] as TF[]).map((tf) => (
+        {(["M15", "M5"] as TF[]).map((tf) => (
           <TouchableOpacity
             key={tf}
             style={[styles.tfBtn, selectedTF === tf && styles.tfBtnActive]}
@@ -239,224 +262,337 @@ export function FibChart() {
             activeOpacity={0.7}
           >
             <Text style={[styles.tfBtnText, selectedTF === tf && styles.tfBtnTextActive]}>
-              {tf}
+              {tf === "M15" ? "M15 · Struktur" : "M5 · Entry"}
             </Text>
           </TouchableOpacity>
         ))}
-        <Text style={styles.tfSubtitle}>
-          {selectedTF === "M15"
-            ? `${m15Candles.length} candle · Zona Fibonacci`
-            : `${candles.length} candle · Entry Presisi`}
+      </View>
+
+      {/* Candle count info */}
+      <View style={styles.infoRow}>
+        <Text style={styles.infoText}>
+          M15: {m15Candles.length} candle · M5: {candles.length} candle
         </Text>
+        {fibLevels && (
+          <Text style={styles.infoText}>
+            Zona: {Math.min(fibLevels.level618, fibLevels.level786).toFixed(1)}–{Math.max(fibLevels.level618, fibLevels.level786).toFixed(1)}
+          </Text>
+        )}
       </View>
 
       {chartW > 0 && (
         <Svg width={chartW} height={CHART_HEIGHT}>
           <Defs>
-            <LinearGradient id="zoneGrad" x1="0" y1="0" x2="0" y2="1">
-              <Stop offset="0" stopColor={C.gold} stopOpacity={0.18} />
-              <Stop offset="1" stopColor={C.gold} stopOpacity={0.04} />
+            <LinearGradient id="buyZone" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={C.gold} stopOpacity={0.22} />
+              <Stop offset="1" stopColor={C.gold} stopOpacity={0.06} />
+            </LinearGradient>
+            <LinearGradient id="sellZone" x1="0" y1="0" x2="0" y2="1">
+              <Stop offset="0" stopColor={C.red} stopOpacity={0.06} />
+              <Stop offset="1" stopColor={C.red} stopOpacity={0.22} />
             </LinearGradient>
           </Defs>
 
-          {/* Grid lines */}
-          {[0.1, 0.3, 0.5, 0.7, 0.9].map((pct, i) => {
+          {/* Grid */}
+          {[0.1, 0.25, 0.4, 0.6, 0.75, 0.9].map((pct, i) => {
             const price = lo + (hi - lo) * (1 - pct);
             const y = priceToY(price, lo, hi, plotH);
             return (
-              <Line key={i} x1={0} y1={y} x2={plotW} y2={y}
-                stroke={C.border} strokeWidth={1} opacity={0.25} />
+              <G key={i}>
+                <Line x1={0} y1={y} x2={plotW} y2={y}
+                  stroke={C.border} strokeWidth={1} opacity={0.2} />
+                <SvgText x={plotW + 2} y={y + 3} fill={C.textDim} fontSize={6.5}>
+                  {price.toFixed(0)}
+                </SvgText>
+              </G>
             );
           })}
 
-          {/* Fibonacci zone gold shading */}
-          {fibLevels && zoneY1 !== null && zoneY2 !== null && (
+          {/* Fibonacci zone highlight (61.8% – 78.6%) */}
+          {fibLevels && zoneYTop !== null && zoneYBot !== null && zoneH > 0 && (
             <G>
-              <Rect x={0} y={zoneY1} width={plotW} height={Math.max(2, zoneY2 - zoneY1)} fill="url(#zoneGrad)" />
-              {(zoneY2 - zoneY1) > 14 && (
+              <Rect
+                x={0}
+                y={Math.max(TOP_PAD, zoneYTop)}
+                width={plotW}
+                height={Math.min(zoneH, plotH)}
+                fill={isBull ? "url(#buyZone)" : "url(#sellZone)"}
+              />
+              {/* Left edge accent */}
+              <Line
+                x1={0} y1={zoneYTop} x2={0} y2={zoneYBot}
+                stroke={C.gold} strokeWidth={2} opacity={0.5}
+              />
+              {/* Zone center label */}
+              {zoneH > 18 && (
                 <G>
-                  <Rect x={plotW / 2 - 45} y={(zoneY1 + zoneY2) / 2 - 8} width={90} height={14} fill="#0A0E17" opacity={0.65} rx={4} />
-                  <SvgText x={plotW / 2} y={(zoneY1 + zoneY2) / 2 + 4} fill={trend === "Bullish" ? C.green : C.red} fontSize={8.5} fontWeight="bold" textAnchor="middle">
-                    {trend === "Bullish" ? "▲ ZONA BUY (61.8–78.6%)" : "▼ ZONA SELL (61.8–78.6%)"}
+                  <Rect
+                    x={plotW / 2 - 70}
+                    y={(zoneYTop + zoneYBot) / 2 - 9}
+                    width={140}
+                    height={16}
+                    fill="#0A0E17"
+                    opacity={0.72}
+                    rx={4}
+                  />
+                  <SvgText
+                    x={plotW / 2}
+                    y={(zoneYTop + zoneYBot) / 2 + 4}
+                    fill={isBull ? C.green : C.red}
+                    fontSize={9}
+                    fontWeight="bold"
+                    textAnchor="middle"
+                  >
+                    {isBull ? "▲ BUY ZONE (M15 Structure)" : "▼ SELL ZONE (M15 Structure)"}
                   </SvgText>
                 </G>
               )}
             </G>
           )}
 
-          {/* EMA lines (M15 chart — calculated from M15 candles) */}
+          {/* EMA Lines — M15 view */}
           {selectedTF === "M15" && ema200Series.length > 0 && (
-            <Path d={emaPath(ema200Series, ema200Series.length)} stroke="#F97316" strokeWidth={1.5} fill="none" opacity={0.85} />
+            <Path d={emaPath(ema200Series)} stroke="#F97316" strokeWidth={1.5} fill="none" opacity={0.85} />
           )}
           {selectedTF === "M15" && ema50Series.length > 0 && (
-            <Path d={emaPath(ema50Series, ema50Series.length)} stroke="#A78BFA" strokeWidth={1.5} fill="none" opacity={0.85} />
+            <Path d={emaPath(ema50Series)} stroke="#A78BFA" strokeWidth={1.5} fill="none" opacity={0.85} />
           )}
 
-          {/* EMA lines (M5 chart — drawn as horizontal M15 EMA reference lines only, strategy uses M15 EMA) */}
+          {/* EMA horizontal references on M5 view */}
           {selectedTF === "M5" && m15Ema200Val !== null && (
-            <LabeledLine
+            <FibLine
               label="M15 EMA200"
-              sublabel={m15Ema200Val.toFixed(1)}
               price={m15Ema200Val}
               color="#F97316"
               lo={lo} hi={hi} plotH={plotH} plotW={plotW}
               dashed strokeWidth={1.5}
+              labelSide="right"
             />
           )}
           {selectedTF === "M5" && m15Ema50Val !== null && (
-            <LabeledLine
+            <FibLine
               label="M15 EMA50"
-              sublabel={m15Ema50Val.toFixed(1)}
               price={m15Ema50Val}
               color="#A78BFA"
               lo={lo} hi={hi} plotH={plotH} plotW={plotW}
               dashed strokeWidth={1.5}
+              labelSide="right"
             />
           )}
 
-          {/* Candlesticks */}
-          {visibleCandles.map((c, i) => {
-            const isBull = c.close >= c.open;
-            const col = isBull ? C.green : C.red;
-            const cx = i * candleW + candleW / 2;
-            const bTop = priceToY(Math.max(c.open, c.close), lo, hi, plotH);
-            const bBot = priceToY(Math.min(c.open, c.close), lo, hi, plotH);
-            const wTop = priceToY(c.high, lo, hi, plotH);
-            const wBot = priceToY(c.low, lo, hi, plotH);
-            const bh = Math.max(1, bBot - bTop);
-            return (
-              <G key={c.epoch}>
-                <Line x1={cx} y1={wTop} x2={cx} y2={wBot} stroke={col} strokeWidth={1} opacity={0.75} />
-                <Rect x={cx - bodyW / 2} y={bTop} width={bodyW} height={bh} fill={col} opacity={0.9} />
-              </G>
-            );
-          })}
-
-          {/* BUY/SELL signal flag */}
-          {currentSignal && (() => {
-            const idx = visibleCandles.findIndex((c) => c.epoch === currentSignal.signalCandleEpoch);
-            if (idx < 0) return null;
-            const isBull = currentSignal.trend === "Bullish";
-            const col = isBull ? C.green : C.red;
-            const cx = idx * candleW + candleW / 2;
-            const candle = visibleCandles[idx];
-            const flagLabel = isBull ? "▲ BUY" : "▼ SELL";
-            const flagW = 36;
-            const flagH = 16;
-            if (isBull) {
-              const tipY = priceToY(candle.high, lo, hi, plotH) - 4;
-              const labelY = tipY - flagH - 4;
-              return (
-                <G>
-                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + flagH} stroke={col} strokeWidth={1} opacity={0.7} />
-                  <Rect x={cx - flagW / 2} y={labelY} width={flagW} height={flagH} fill={col} rx={4} opacity={0.92} />
-                  <SvgText x={cx} y={labelY + flagH - 4} fill="#fff" fontSize={9} fontWeight="bold" textAnchor="middle">{flagLabel}</SvgText>
-                </G>
-              );
-            } else {
-              const tipY = priceToY(candle.low, lo, hi, plotH) + 4;
-              const labelY = tipY + 4;
-              return (
-                <G>
-                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY} stroke={col} strokeWidth={1} opacity={0.7} />
-                  <Rect x={cx - flagW / 2} y={labelY} width={flagW} height={flagH} fill={col} rx={4} opacity={0.92} />
-                  <SvgText x={cx} y={labelY + flagH - 4} fill="#fff" fontSize={9} fontWeight="bold" textAnchor="middle">{flagLabel}</SvgText>
-                </G>
-              );
-            }
-          })()}
-
-          {/* Fibonacci lines */}
+          {/* ── Fibonacci Structure Lines ── */}
           {fibLevels && (() => {
-            const level618IsHigher = fibLevels.level618 > fibLevels.level786;
-            const label618 = level618IsHigher ? "61.8% ZONA ATAS" : "61.8% ZONA BAWAH";
-            const label786 = level618IsHigher ? "78.6% ZONA BAWAH" : "78.6% ZONA ATAS";
+            const trendUp = trend === "Bullish";
             return (
               <>
-                <LabeledLine
-                  label="▲ SWING HIGH"
-                  sublabel={`${fibLevels.swingHigh.toFixed(2)}`}
-                  price={fibLevels.swingHigh}
-                  color={C.green}
+                {/* 0.0% — Swing High (Bullish) or Swing Low (Bearish) */}
+                <FibLine
+                  label={trendUp
+                    ? "0.0% · Swing High (Resistance)"
+                    : "0.0% · Swing Low (Support)"}
+                  price={trendUp ? fibLevels.swingHigh : fibLevels.swingLow}
+                  color={trendUp ? C.green : C.red}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                  dashed={false} strokeWidth={1.5} showArrow="up"
+                  dashed={false}
+                  strokeWidth={1.5}
                 />
-                <LabeledLine
-                  label={label618}
+
+                {/* 61.8% — Golden Retracement */}
+                <FibLine
+                  label="61.8% · Golden Retracement (Primary Entry Zone)"
                   price={fibLevels.level618}
                   color={C.gold}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                  dashed strokeWidth={1}
+                  dashed
+                  strokeWidth={1.2}
                 />
-                <LabeledLine
-                  label={label786}
+
+                {/* 78.6% — Deep Retracement */}
+                <FibLine
+                  label="78.6% · Deep Retracement (Final Defense Zone)"
                   price={fibLevels.level786}
-                  color={C.gold}
+                  color="#FBBF24"
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                  dashed strokeWidth={1}
+                  dashed
+                  strokeWidth={1.2}
                 />
-                <LabeledLine
-                  label="▼ SWING LOW"
-                  sublabel={`${fibLevels.swingLow.toFixed(2)}`}
-                  price={fibLevels.swingLow}
-                  color={C.red}
+
+                {/* 100% — Swing Low (Bullish) or Swing High (Bearish) */}
+                <FibLine
+                  label={trendUp
+                    ? "100% · Swing Low (SL Reference)"
+                    : "100% · Swing High (SL Reference)"}
+                  price={trendUp ? fibLevels.swingLow : fibLevels.swingHigh}
+                  color={trendUp ? C.red : C.green}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                  dashed={false} strokeWidth={1.5} showArrow="down"
+                  dashed={false}
+                  strokeWidth={1}
                 />
-                <LabeledLine
-                  label="-27% REFERENSI"
-                  sublabel="Extension Target"
+
+                {/* -27% Extension — Take Profit Target */}
+                <FibLine
+                  label="-27% Extension (Take Profit Target)"
                   price={fibLevels.extensionNeg27}
                   color={C.blue}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                  dashed strokeWidth={1}
+                  dashed
+                  strokeWidth={1.5}
                 />
               </>
             );
           })()}
 
-          {/* Signal lines */}
+          {/* ── Candlesticks ── */}
+          {visibleCandles.map((c, i) => {
+            const isBullCandle = c.close >= c.open;
+            const col = isBullCandle ? C.green : C.red;
+            const cx = i * candleW + candleW / 2;
+            const bTop = priceToY(Math.max(c.open, c.close), lo, hi, plotH);
+            const bBot = priceToY(Math.min(c.open, c.close), lo, hi, plotH);
+            const wTop = priceToY(c.high, lo, hi, plotH);
+            const wBot = priceToY(c.low, lo, hi, plotH);
+            const bh = Math.max(2, bBot - bTop);
+            return (
+              <G key={c.epoch}>
+                {/* Wick */}
+                <Line
+                  x1={cx} y1={wTop} x2={cx} y2={wBot}
+                  stroke={col} strokeWidth={1.2} opacity={0.8}
+                />
+                {/* Body */}
+                <Rect
+                  x={cx - bodyW / 2}
+                  y={bTop}
+                  width={bodyW}
+                  height={bh}
+                  fill={col}
+                  opacity={isBullCandle ? 0.92 : 0.85}
+                  rx={0.5}
+                />
+              </G>
+            );
+          })}
+
+          {/* ── Signal confirmation label ── */}
+          {currentSignal && (() => {
+            const idx = visibleCandles.findIndex((c) => c.epoch === currentSignal.signalCandleEpoch);
+            const signalIsBull = currentSignal.trend === "Bullish";
+            const col = signalIsBull ? C.green : C.red;
+            const signalLabel = signalIsBull
+              ? "BUY CONFIRMED"
+              : "SELL CONFIRMED";
+            const subLabel = "M5 Execution · M15 Zone";
+
+            const cx = idx >= 0 ? idx * candleW + candleW / 2 : plotW - 50;
+            const refCandle = idx >= 0 ? visibleCandles[idx] : null;
+            const flagW = 100;
+            const flagH = 28;
+
+            if (signalIsBull) {
+              const tipY = refCandle
+                ? priceToY(refCandle.high, lo, hi, plotH) - 5
+                : priceToY(currentSignal.entryPrice, lo, hi, plotH) - 5;
+              const labelY = Math.max(TOP_PAD, tipY - flagH - 6);
+              const lx = Math.min(Math.max(cx - flagW / 2, 2), plotW - flagW - 4);
+              return (
+                <G>
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + flagH} stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Polygon
+                    points={`${cx - 5},${tipY} ${cx + 5},${tipY} ${cx},${tipY - 6}`}
+                    fill={col} opacity={0.9}
+                  />
+                  <Rect x={lx} y={labelY} width={flagW} height={flagH} fill={col} rx={5} opacity={0.95} />
+                  <SvgText x={lx + flagW / 2} y={labelY + 11} fill="#fff" fontSize={8.5} fontWeight="bold" textAnchor="middle">{signalLabel}</SvgText>
+                  <SvgText x={lx + flagW / 2} y={labelY + 22} fill="#fff" fontSize={7} textAnchor="middle" opacity={0.85}>{subLabel}</SvgText>
+                </G>
+              );
+            } else {
+              const tipY = refCandle
+                ? priceToY(refCandle.low, lo, hi, plotH) + 5
+                : priceToY(currentSignal.entryPrice, lo, hi, plotH) + 5;
+              const labelY = Math.min(tipY + 6, TOP_PAD + plotH - flagH - 2);
+              const lx = Math.min(Math.max(cx - flagW / 2, 2), plotW - flagW - 4);
+              return (
+                <G>
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY} stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Polygon
+                    points={`${cx - 5},${tipY} ${cx + 5},${tipY} ${cx},${tipY + 6}`}
+                    fill={col} opacity={0.9}
+                  />
+                  <Rect x={lx} y={labelY} width={flagW} height={flagH} fill={col} rx={5} opacity={0.95} />
+                  <SvgText x={lx + flagW / 2} y={labelY + 11} fill="#fff" fontSize={8.5} fontWeight="bold" textAnchor="middle">{signalLabel}</SvgText>
+                  <SvgText x={lx + flagW / 2} y={labelY + 22} fill="#fff" fontSize={7} textAnchor="middle" opacity={0.85}>{subLabel}</SvgText>
+                </G>
+              );
+            }
+          })()}
+
+          {/* ── Signal levels (Entry / SL / TP) ── */}
           {currentSignal && (
             <>
-              <LabeledLine
-                label={`✦ ENTRY ${currentSignal.trend === "Bullish" ? "BUY" : "SELL"}`}
-                sublabel={`${currentSignal.entryPrice.toFixed(2)}`}
+              <FibLine
+                label={`ENTRY ${currentSignal.trend === "Bullish" ? "BUY" : "SELL"}`}
                 price={currentSignal.entryPrice}
                 color={currentSignal.trend === "Bullish" ? C.green : C.red}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed={false} strokeWidth={2}
+                dashed={false}
+                strokeWidth={2}
+                labelSide="right"
               />
-              <LabeledLine
-                label="✕ STOP LOSS"
-                sublabel={`${currentSignal.stopLoss.toFixed(2)}`}
+              <FibLine
+                label="STOP LOSS"
                 price={currentSignal.stopLoss}
                 color={C.red}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed strokeWidth={1.5}
+                dashed
+                strokeWidth={1.5}
+                labelSide="right"
               />
-              <LabeledLine
-                label="✓ TAKE PROFIT"
-                sublabel={`${currentSignal.takeProfit.toFixed(2)}`}
+              <FibLine
+                label="TAKE PROFIT (-27%)"
                 price={currentSignal.takeProfit}
-                color={C.green}
+                color={C.blue}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed strokeWidth={1.5}
+                dashed
+                strokeWidth={1.5}
+                labelSide="right"
               />
             </>
           )}
 
-          {/* Current price badge */}
+          {/* ── Live price ticker ── */}
           {currentPrice !== null && (() => {
             const y = priceToY(currentPrice, lo, hi, plotH);
             const lastC = visibleCandles[visibleCandles.length - 1];
-            const isBull = !lastC || currentPrice >= lastC.open;
-            const lc = isBull ? C.green : C.red;
+            const priceUp = !lastC || currentPrice >= lastC.open;
+            const lc = priceUp ? C.green : C.red;
             return (
               <G>
-                <Line x1={0} y1={y} x2={plotW} y2={y} stroke={lc} strokeWidth={1} strokeDasharray="2,2" opacity={0.5} />
-                <Polygon points={`${plotW},${y - 5} ${plotW + 6},${y} ${plotW},${y + 5}`} fill={lc} />
-                <Rect x={plotW + 6} y={y - 8} width={RIGHT_W - 8} height={16} fill={lc} rx={3} />
-                <SvgText x={plotW + 9} y={y + 4} fill="#fff" fontSize={8.5} fontWeight="bold">
+                <Path
+                  d={dashedPath(0, y, plotW, 3, 3)}
+                  stroke={lc}
+                  strokeWidth={1}
+                  opacity={0.45}
+                />
+                <Polygon
+                  points={`${plotW},${y - 5} ${plotW + 6},${y} ${plotW},${y + 5}`}
+                  fill={lc}
+                />
+                <Rect
+                  x={plotW + 6}
+                  y={y - 9}
+                  width={RIGHT_W - 8}
+                  height={18}
+                  fill={lc}
+                  rx={3}
+                />
+                <SvgText
+                  x={plotW + 9}
+                  y={y + 4}
+                  fill="#fff"
+                  fontSize={8}
+                  fontWeight="bold"
+                >
                   {currentPrice.toFixed(2)}
                 </SvgText>
               </G>
@@ -465,24 +601,21 @@ export function FibChart() {
         </Svg>
       )}
 
-      {/* Bottom legend */}
+      {/* Legend */}
       <View style={styles.legend}>
-        <LegItem color={C.green} label="Swing H ▲" />
-        <LegItem color={C.red} label="Swing L ▼" />
-        <LegItem color={C.gold} label="Zona Entry" box />
-        <LegItem color={C.blue} label="-27% Ref" />
+        <LegItem color={C.gold} label="61.8% Zone" box />
+        <LegItem color="#FBBF24" label="78.6% Zone" box />
+        <LegItem color={C.blue} label="-27% TP" />
         <LegItem color="#A78BFA" label="EMA50" line />
         <LegItem color="#F97316" label="EMA200" line />
         {currentSignal && <LegItem color={C.red} label="Stop Loss" />}
-        {currentSignal && <LegItem color={C.green} label="Take Profit" />}
       </View>
 
-      {/* No data overlay */}
       {hasNoData && (
         <View style={styles.overlay}>
           <Text style={styles.overlayText}>Menghubungkan ke Deriv WebSocket...</Text>
-          <Text style={[styles.overlayText, { fontSize: 10, marginTop: 4, opacity: 0.7 }]}>
-            Memuat data candle historis...
+          <Text style={[styles.overlayText, { fontSize: 10, marginTop: 4, opacity: 0.6 }]}>
+            Memuat data candle M15 dan M5...
           </Text>
         </View>
       )}
@@ -490,8 +623,16 @@ export function FibChart() {
   );
 }
 
-function LegItem({ color, label, line = false, box = false }: {
-  color: string; label: string; line?: boolean; box?: boolean;
+function LegItem({
+  color,
+  label,
+  line = false,
+  box = false,
+}: {
+  color: string;
+  label: string;
+  line?: boolean;
+  box?: boolean;
 }) {
   return (
     <View style={styles.legItem}>
@@ -519,35 +660,47 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     justifyContent: "space-between",
-    alignItems: "center",
+    alignItems: "flex-start",
     paddingHorizontal: 14,
-    paddingTop: 10,
-    paddingBottom: 6,
+    paddingTop: 12,
+    paddingBottom: 8,
+    gap: 8,
   },
-  headerLeft: { flex: 1 },
-  title: {
-    fontFamily: "Inter_600SemiBold",
+  headerTitle: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 13,
+    color: C.text,
+    letterSpacing: 0.3,
+  },
+  headerSub: {
+    fontFamily: "Inter_400Regular",
     fontSize: 10,
     color: C.textDim,
-    letterSpacing: 1.2,
+    marginTop: 2,
   },
-  trendLabel: {
+  trendPill: {
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignSelf: "flex-start",
+  },
+  trendPillText: {
     fontFamily: "Inter_700Bold",
-    fontSize: 11,
+    fontSize: 10,
     letterSpacing: 0.5,
   },
   tfRow: {
     flexDirection: "row",
-    alignItems: "center",
     paddingHorizontal: 12,
-    paddingBottom: 8,
-    gap: 6,
+    paddingBottom: 6,
+    gap: 8,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
   },
   tfBtn: {
-    paddingHorizontal: 12,
-    paddingVertical: 4,
+    paddingHorizontal: 14,
+    paddingVertical: 5,
     borderRadius: 8,
     borderWidth: 1,
     borderColor: C.border,
@@ -559,25 +712,29 @@ const styles = StyleSheet.create({
   },
   tfBtnText: {
     fontFamily: "Inter_600SemiBold",
-    fontSize: 12,
+    fontSize: 11,
     color: C.textDim,
   },
   tfBtnTextActive: {
     color: C.gold,
   },
-  tfSubtitle: {
+  infoRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+  },
+  infoText: {
     fontFamily: "Inter_400Regular",
-    fontSize: 10,
+    fontSize: 9.5,
     color: C.textDim,
-    marginLeft: 4,
-    flex: 1,
   },
   legend: {
     flexDirection: "row",
     flexWrap: "wrap",
     paddingHorizontal: 12,
     paddingVertical: 8,
-    gap: 8,
+    gap: 10,
     borderTopWidth: 1,
     borderTopColor: C.border,
   },
@@ -589,7 +746,9 @@ const styles = StyleSheet.create({
   overlay: {
     position: "absolute",
     top: 80,
-    left: 0, right: 0, bottom: 32,
+    left: 0,
+    right: 0,
+    bottom: 32,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: C.card + "D0",

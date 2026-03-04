@@ -655,15 +655,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     const confirmationType: ConfirmationType = isEngulfing ? "engulfing" : "rejection";
 
-    // SL = Swing High/Low (100%/0%), TP = Swing Low/High (0%/100%)
+    // SL = Swing Low (Bullish) / Swing High (Bearish) — extreme of the swing
+    // TP = -27% Extension target (beyond swing extreme, continuation play)
     let sl: number;
     let tp: number;
     if (trend === "Bullish") {
       sl = fibLevels.swingLow;
-      tp = fibLevels.swingHigh;
+      tp = fibLevels.extensionNeg27;
     } else {
       sl = fibLevels.swingHigh;
-      tp = fibLevels.swingLow;
+      tp = fibLevels.extensionNeg27;
     }
 
     const slDistance = Math.abs(currentPrice - sl);
