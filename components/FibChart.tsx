@@ -115,24 +115,51 @@ export function FibChart() {
   const { candles, m15Candles, fibLevels, currentPrice, currentSignal, activeSignal, trend, atr } = useTrading();
   const [chartW, setChartW] = useState(0);
   const [selectedTF, setSelectedTF] = useState<TF>("M15");
-  // Responsive chart height: ~75% of width, minimum 300px, max 450px
-  const CHART_HEIGHT = chartW > 0 ? Math.min(450, Math.max(300, Math.round(chartW * 0.75))) : 300;
   const visibleCount = VISIBLE[selectedTF];
+  // Chart height: responsive to screen width, fixed proportion — clean and tight
+  const CHART_HEIGHT = chartW > 0 ? Math.min(400, Math.max(300, Math.round(chartW * 0.88))) : 320;
 
+  // ── Visible candles: on M15, window starts from swingHigh/swingLow candle ──
   const visibleCandles = useMemo(() => {
     const src = selectedTF === "M15" ? m15Candles : candles;
-    return src.length === 0 ? [] : src.slice(-visibleCount);
-  }, [selectedTF, candles, m15Candles, visibleCount]);
+    if (src.length === 0) return [];
+
+    // For M5, use fixed window
+    if (selectedTF !== "M15" || !fibLevels) return src.slice(-visibleCount);
+
+    // Find candle index where swingHigh occurred (by matching candle.high)
+    let highIdx = -1;
+    let lowIdx = -1;
+    let bestHighDiff = Infinity;
+    let bestLowDiff = Infinity;
+    for (let i = 0; i < src.length; i++) {
+      const hd = Math.abs(src[i].high - fibLevels.swingHigh);
+      const ld = Math.abs(src[i].low - fibLevels.swingLow);
+      if (hd < bestHighDiff) { bestHighDiff = hd; highIdx = i; }
+      if (ld < bestLowDiff) { bestLowDiff = ld; lowIdx = i; }
+    }
+
+    // Start from the earlier of the two swing candles (with 2 candles of context)
+    const startIdx = highIdx >= 0 && lowIdx >= 0
+      ? Math.max(0, Math.min(highIdx, lowIdx) - 2)
+      : src.length - visibleCount;
+
+    const sliced = src.slice(startIdx);
+    // Cap at 80 candles so they remain readable
+    return sliced.length > 80 ? sliced.slice(-80) : sliced;
+  }, [selectedTF, candles, m15Candles, visibleCount, fibLevels]);
 
   const ema50Series = useMemo(() => {
     if (selectedTF !== "M15" || m15Candles.length < 50) return [];
-    return calcEMAFull(m15Candles.map((c) => c.close), 50).slice(-visibleCount);
-  }, [selectedTF, m15Candles, visibleCount]);
+    const full = calcEMAFull(m15Candles.map((c) => c.close), 50);
+    return full.slice(-visibleCandles.length);
+  }, [selectedTF, m15Candles, visibleCandles.length]);
 
   const ema200Series = useMemo(() => {
     if (selectedTF !== "M15" || m15Candles.length < 200) return [];
-    return calcEMAFull(m15Candles.map((c) => c.close), 200).slice(-visibleCount);
-  }, [selectedTF, m15Candles, visibleCount]);
+    const full = calcEMAFull(m15Candles.map((c) => c.close), 200);
+    return full.slice(-visibleCandles.length);
+  }, [selectedTF, m15Candles, visibleCandles.length]);
 
   const m15Ema50Val = useMemo(() => {
     if (ema50Series.length === 0) return null;
@@ -146,7 +173,7 @@ export function FibChart() {
     return isNaN(v) ? null : v;
   }, [ema200Series]);
 
-  // ── Range: candle-only, NO fib expansion. Fib levels outside = edge badge ──
+  // ── Range: smart expansion — include fib levels but prevent huge empty gaps ──
   const { lo, hi } = useMemo(() => {
     if (visibleCandles.length === 0) return { lo: 3200, hi: 3300 };
     let loV = Math.min(...visibleCandles.map((c) => c.low));
@@ -155,9 +182,16 @@ export function FibChart() {
       loV = Math.min(loV, currentPrice);
       hiV = Math.max(hiV, currentPrice);
     }
-    const pad = (hiV - loV) * 0.1;
+    if (fibLevels) {
+      // Candle window already includes swingHigh/swingLow candles, just ensure bounds
+      hiV = Math.max(hiV, fibLevels.swingHigh);
+      loV = Math.min(loV, fibLevels.swingLow);
+      // Always include extension (-27% TP) — it's only 27% below swingLow
+      loV = Math.min(loV, fibLevels.extensionNeg27);
+    }
+    const pad = (hiV - loV) * 0.05;
     return { lo: loV - pad, hi: hiV + pad };
-  }, [visibleCandles, currentPrice]);
+  }, [visibleCandles, currentPrice, fibLevels]);
 
   const plotW = chartW - RIGHT_W;
   const plotH = CHART_HEIGHT - TOP_PAD - BOT_PAD;

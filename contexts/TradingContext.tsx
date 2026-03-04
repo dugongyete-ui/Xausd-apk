@@ -241,7 +241,7 @@ function findSwings(
   trend: "Bullish" | "Bearish"
 ): { swingHigh: number; swingLow: number; anchorEpoch: number } | null {
   const LOOKBACK = Math.min(candles.length, 100);
-  const PAIR_LOOKBACK = 80;
+  const PAIR_LOOKBACK = 25;
   const slice = candles.slice(-LOOKBACK);
   const n = slice.length;
   if (n < 10) return null;
