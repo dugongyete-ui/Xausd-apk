@@ -198,7 +198,7 @@ function findSwings(
   const offset = candles.length - LOOKBACK; // slice[i] === candles[offset + i]
 
   if (trend === "Bearish") {
-    // ① Loop dari n-4: right neighbors n-3 dan n-2 sudah closed, n-1 live tidak disentuh
+    // ① Loop dari n-4: right neighbors sudah closed, live candle tidak disentuh
     for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingHigh =
@@ -214,7 +214,11 @@ function findSwings(
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 >= e200) continue;
 
-      // ③ Cari fractal LOW SEBELUM fractal high ini (pair simetris)
+      // ③ Cari fractal LOW TERDEKAT sebelum fractal HIGH ini
+      //    Chronological rule: Low(lama) → High(baru) harus single-leg bersih.
+      //    Setelah menemukan fractal LOW di j, verifikasi tidak ada
+      //    fractal HIGH lain di antara j dan i (tumpang tindih).
+      let pairLowIdx: number | null = null;
       let pairLow: number | null = null;
       for (let j = i - 2; j >= 4; j--) {
         const p = slice[j];
@@ -222,11 +226,27 @@ function findSwings(
           p.low < slice[j - 1].low && p.low < slice[j - 2].low &&
           p.low < slice[j + 1].low && p.low < slice[j + 2].low;
         if (isFractalLow) {
+          pairLowIdx = j;
           pairLow = p.low;
           break;
         }
       }
-      if (pairLow === null) continue;
+      if (pairLowIdx === null || pairLow === null) continue;
+
+      // Validasi chronological: tidak boleh ada fractal HIGH di antara j dan i
+      let hasIntermediateHigh = false;
+      for (let k = pairLowIdx + 2; k <= i - 2; k++) {
+        if (k < 2 || k + 2 >= n) continue;
+        if (
+          slice[k].high > slice[k - 1].high && slice[k].high > slice[k - 2].high &&
+          slice[k].high > slice[k + 1].high && slice[k].high > slice[k + 2].high
+        ) {
+          hasIntermediateHigh = true;
+          break;
+        }
+      }
+      if (hasIntermediateHigh) continue;
+
       if (c.high - pairLow < 5) continue;
       return { swingHigh: c.high, swingLow: pairLow, anchorEpoch: c.epoch };
     }
@@ -247,7 +267,10 @@ function findSwings(
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 <= e200) continue;
 
-      // ③ Cari fractal HIGH SEBELUM fractal low ini (pair simetris)
+      // ③ Cari fractal HIGH TERDEKAT sebelum fractal LOW ini
+      //    Chronological rule: High(lama) → Low(baru) harus single-leg bersih.
+      //    Verifikasi tidak ada fractal LOW lain di antara j dan i.
+      let pairHighIdx: number | null = null;
       let pairHigh: number | null = null;
       for (let j = i - 2; j >= 4; j--) {
         const p = slice[j];
@@ -255,11 +278,27 @@ function findSwings(
           p.high > slice[j - 1].high && p.high > slice[j - 2].high &&
           p.high > slice[j + 1].high && p.high > slice[j + 2].high;
         if (isFractalHigh) {
+          pairHighIdx = j;
           pairHigh = p.high;
           break;
         }
       }
-      if (pairHigh === null) continue;
+      if (pairHighIdx === null || pairHigh === null) continue;
+
+      // Validasi chronological: tidak boleh ada fractal LOW di antara j dan i
+      let hasIntermediateLow = false;
+      for (let k = pairHighIdx + 2; k <= i - 2; k++) {
+        if (k < 2 || k + 2 >= n) continue;
+        if (
+          slice[k].low < slice[k - 1].low && slice[k].low < slice[k - 2].low &&
+          slice[k].low < slice[k + 1].low && slice[k].low < slice[k + 2].low
+        ) {
+          hasIntermediateLow = true;
+          break;
+        }
+      }
+      if (hasIntermediateLow) continue;
+
       if (pairHigh - c.low < 5) continue;
       return { swingHigh: pairHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
@@ -285,21 +324,36 @@ function calcFib(swingHigh: number, swingLow: number, trend: "Bullish" | "Bearis
   };
 }
 
-// M5 Sell validation:
-// - Close bearish (close < open)
-// - Upper wick > body
-// M5 Buy validation:
-// - Close bullish (close > open)
-// - Lower wick > body
-function checkRejection(candle: Candle, trend: "Bullish" | "Bearish"): boolean {
+// Rejection Pin Bar — strict 5-condition filter (mirrors TradingContext):
+// ① Candle arah sesuai trend
+// ② Wick dominan ≥ 1.5× body
+// ③ Body di sisi yang benar dari midpoint candle
+// ④ Ujung wick menyentuh level 78.6% (toleransi 0.1%)
+// Hanya candle CLOSED yang dievaluasi (dijamin dari caller)
+const M5_ATR_MIN = 1.0;
+
+function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: number): boolean {
   const body = Math.abs(candle.close - candle.open);
   if (body === 0) return false;
+  const midpoint = (candle.high + candle.low) / 2;
+  const tolerance = level786 * 0.001;
+
   if (trend === "Bullish") {
+    if (candle.close <= candle.open) return false;
     const lowerWick = Math.min(candle.open, candle.close) - candle.low;
-    return candle.close > candle.open && lowerWick >= body * 1.5;
+    if (lowerWick < body * 1.5) return false;
+    const bodyCenter = (candle.open + candle.close) / 2;
+    if (bodyCenter <= midpoint) return false;
+    if (Math.abs(candle.low - level786) > tolerance) return false;
+    return true;
   }
+  if (candle.close >= candle.open) return false;
   const upperWick = candle.high - Math.max(candle.open, candle.close);
-  return candle.close < candle.open && upperWick > body;
+  if (upperWick < body * 1.5) return false;
+  const bodyCenter = (candle.open + candle.close) / 2;
+  if (bodyCenter >= midpoint) return false;
+  if (Math.abs(candle.high - level786) > tolerance) return false;
+  return true;
 }
 
 function checkEngulfing(prev: Candle, curr: Candle, trend: "Bullish" | "Bearish"): boolean {
@@ -366,6 +420,8 @@ class DerivService {
   private lastSwing: { anchorEpoch: number; trend: string } | null = null;
   private fibLevels: FibLevels | null = null;
   private currentSignal: TradingSignal | null = null;
+  // Single position rule: satu signal per fractal anchor
+  private lastSignaledAnchorEpoch: number | null = null;
   private signalHistory: TradingSignal[] = [];
   private savedSignalKeys: Set<string> = new Set();
 
@@ -582,7 +638,15 @@ class DerivService {
   }
 
   private detectSignal(trend: "Bullish" | "Bearish") {
-    if (!this.fibLevels || this.m5Candles.length < 2 || this.currentPrice === null) {
+    const anchorEpoch = this.lastSwing?.anchorEpoch ?? null;
+
+    if (!this.fibLevels || this.m5Candles.length < 3 || this.currentPrice === null || anchorEpoch === null) {
+      this.currentSignal = null;
+      return;
+    }
+
+    // ⑤ Single position rule: satu signal per fractal anchor
+    if (this.lastSignaledAnchorEpoch === anchorEpoch) {
       this.currentSignal = null;
       return;
     }
@@ -597,18 +661,25 @@ class DerivService {
     const lo = Math.min(fib.level618, fib.level786);
     const hi = Math.max(fib.level618, fib.level786);
 
-    // Price must be inside Fibonacci golden zone (61.8–78.6)
     if (this.currentPrice < lo || this.currentPrice > hi) {
       this.currentSignal = null;
       return;
     }
 
-    const lastM5 = this.m5Candles[this.m5Candles.length - 1];
-    const prevM5 = this.m5Candles[this.m5Candles.length - 2];
+    // ① Gunakan candle CLOSED: n-2 (closed terakhir), n-3 (sebelumnya)
+    const closedM5 = this.m5Candles[this.m5Candles.length - 2];
+    const prevM5   = this.m5Candles[this.m5Candles.length - 3];
 
-    // ENTRY VALIDATION: rejection or engulfing
-    const isRejection = checkRejection(lastM5, trend);
-    const isEngulfing = checkEngulfing(prevM5, lastM5, trend);
+    // ④ Volatility filter: ATR M5 harus cukup besar
+    const m5ATR = calcATR(this.m5Candles.slice(0, -1), ATR_PERIOD);
+    if (m5ATR < M5_ATR_MIN) {
+      this.currentSignal = null;
+      return;
+    }
+
+    // ② & ③ Rejection (strict: wick ≥ 1.5×, body sisi benar, sentuh 78.6%)
+    const isRejection = checkRejection(closedM5, trend, fib.level786);
+    const isEngulfing = checkEngulfing(prevM5, closedM5, trend);
     if (!isRejection && !isEngulfing) {
       this.currentSignal = null;
       return;
@@ -648,6 +719,8 @@ class DerivService {
 
     if (!this.savedSignalKeys.has(sigId)) {
       this.savedSignalKeys.add(sigId);
+      // ⑤ Tandai anchor ini sudah dipakai — blok signal baru untuk anchor yang sama
+      this.lastSignaledAnchorEpoch = anchorEpoch;
       this.signalHistory.unshift(signal);
       if (this.signalHistory.length > 100) this.signalHistory.pop();
       console.log(`[DerivService] NEW SIGNAL: ${trend} @ ${this.currentPrice}, RR: ${riskReward}`);
