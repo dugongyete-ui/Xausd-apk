@@ -123,6 +123,20 @@ function FibLine({
   );
 }
 
+const LOT_SIZE = 0.01;
+const CONTRACT_SIZE = 100;
+
+function calcFloatingPnL(
+  trend: "Bullish" | "Bearish",
+  entryPrice: number,
+  currentPrice: number
+): number {
+  const diff = trend === "Bullish"
+    ? currentPrice - entryPrice
+    : entryPrice - currentPrice;
+  return diff * CONTRACT_SIZE * LOT_SIZE;
+}
+
 export function FibChart() {
   const {
     candles,
@@ -130,6 +144,7 @@ export function FibChart() {
     fibLevels,
     currentPrice,
     currentSignal,
+    activeSignal,
     trend,
   } = useTrading();
 
@@ -484,55 +499,57 @@ export function FibChart() {
             );
           })}
 
-          {/* ── Signal confirmation label ── */}
+          {/* ── Signal confirmation label (BUY / SELL badge) ── */}
           {currentSignal && (() => {
             const idx = visibleCandles.findIndex((c) => c.epoch === currentSignal.signalCandleEpoch);
             const signalIsBull = currentSignal.trend === "Bullish";
             const col = signalIsBull ? C.green : C.red;
-            const signalLabel = signalIsBull
-              ? "BUY CONFIRMED"
-              : "SELL CONFIRMED";
-            const subLabel = "M5 Execution · M15 Zone";
+            const badgeLabel = signalIsBull ? "▲ BUY" : "▼ SELL";
+            const confirmLabel = currentSignal.confirmationType === "rejection" ? "Pin Bar" : "Engulfing";
 
             const cx = idx >= 0 ? idx * candleW + candleW / 2 : plotW - 50;
             const refCandle = idx >= 0 ? visibleCandles[idx] : null;
-            const flagW = 100;
-            const flagH = 28;
+            const badgeW = 72;
+            const badgeH = 30;
 
             if (signalIsBull) {
               const tipY = refCandle
                 ? priceToY(refCandle.high, lo, hi, plotH) - 5
                 : priceToY(currentSignal.entryPrice, lo, hi, plotH) - 5;
-              const labelY = Math.max(TOP_PAD, tipY - flagH - 6);
-              const lx = Math.min(Math.max(cx - flagW / 2, 2), plotW - flagW - 4);
+              const labelY = Math.max(TOP_PAD, tipY - badgeH - 8);
+              const lx = Math.min(Math.max(cx - badgeW / 2, 2), plotW - badgeW - 4);
               return (
                 <G>
-                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + flagH} stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + badgeH} stroke={col} strokeWidth={1.2} opacity={0.8} />
                   <Polygon
-                    points={`${cx - 5},${tipY} ${cx + 5},${tipY} ${cx},${tipY - 6}`}
-                    fill={col} opacity={0.9}
+                    points={`${cx - 5},${tipY} ${cx + 5},${tipY} ${cx},${tipY - 7}`}
+                    fill={col} opacity={1}
                   />
-                  <Rect x={lx} y={labelY} width={flagW} height={flagH} fill={col} rx={5} opacity={0.95} />
-                  <SvgText x={lx + flagW / 2} y={labelY + 11} fill="#fff" fontSize={8.5} fontWeight="bold" textAnchor="middle">{signalLabel}</SvgText>
-                  <SvgText x={lx + flagW / 2} y={labelY + 22} fill="#fff" fontSize={7} textAnchor="middle" opacity={0.85}>{subLabel}</SvgText>
+                  <Rect x={lx} y={labelY} width={badgeW} height={badgeH} fill={col} rx={5} opacity={1} />
+                  <Rect x={lx + 1} y={labelY + 1} width={badgeW - 2} height={badgeH - 2} fill="none"
+                    stroke="#ffffff" strokeWidth={0.5} rx={4} opacity={0.4} />
+                  <SvgText x={lx + badgeW / 2} y={labelY + 13} fill="#fff" fontSize={11} fontWeight="bold" textAnchor="middle">{badgeLabel}</SvgText>
+                  <SvgText x={lx + badgeW / 2} y={labelY + 25} fill="#fff" fontSize={7.5} textAnchor="middle" opacity={0.9}>{confirmLabel}</SvgText>
                 </G>
               );
             } else {
               const tipY = refCandle
                 ? priceToY(refCandle.low, lo, hi, plotH) + 5
                 : priceToY(currentSignal.entryPrice, lo, hi, plotH) + 5;
-              const labelY = Math.min(tipY + 6, TOP_PAD + plotH - flagH - 2);
-              const lx = Math.min(Math.max(cx - flagW / 2, 2), plotW - flagW - 4);
+              const labelY = Math.min(tipY + 8, TOP_PAD + plotH - badgeH - 2);
+              const lx = Math.min(Math.max(cx - badgeW / 2, 2), plotW - badgeW - 4);
               return (
                 <G>
-                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY} stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY} stroke={col} strokeWidth={1.2} opacity={0.8} />
                   <Polygon
-                    points={`${cx - 5},${tipY} ${cx + 5},${tipY} ${cx},${tipY + 6}`}
-                    fill={col} opacity={0.9}
+                    points={`${cx - 5},${tipY} ${cx + 5},${tipY} ${cx},${tipY + 7}`}
+                    fill={col} opacity={1}
                   />
-                  <Rect x={lx} y={labelY} width={flagW} height={flagH} fill={col} rx={5} opacity={0.95} />
-                  <SvgText x={lx + flagW / 2} y={labelY + 11} fill="#fff" fontSize={8.5} fontWeight="bold" textAnchor="middle">{signalLabel}</SvgText>
-                  <SvgText x={lx + flagW / 2} y={labelY + 22} fill="#fff" fontSize={7} textAnchor="middle" opacity={0.85}>{subLabel}</SvgText>
+                  <Rect x={lx} y={labelY} width={badgeW} height={badgeH} fill={col} rx={5} opacity={1} />
+                  <Rect x={lx + 1} y={labelY + 1} width={badgeW - 2} height={badgeH - 2} fill="none"
+                    stroke="#ffffff" strokeWidth={0.5} rx={4} opacity={0.4} />
+                  <SvgText x={lx + badgeW / 2} y={labelY + 13} fill="#fff" fontSize={11} fontWeight="bold" textAnchor="middle">{badgeLabel}</SvgText>
+                  <SvgText x={lx + badgeW / 2} y={labelY + 25} fill="#fff" fontSize={7.5} textAnchor="middle" opacity={0.9}>{confirmLabel}</SvgText>
                 </G>
               );
             }
@@ -625,6 +642,51 @@ export function FibChart() {
         <LegItem color="#A78BFA" label="EMA50" line />
         <LegItem color="#F97316" label="EMA200" line />
       </View>
+
+      {/* ── Real-time PnL Panel ── */}
+      {activeSignal && currentPrice !== null && (() => {
+        const pnl = calcFloatingPnL(activeSignal.trend, activeSignal.entryPrice, currentPrice);
+        const isProfit = pnl >= 0;
+        const isBull = activeSignal.trend === "Bullish";
+        const dirColor = isBull ? C.green : C.red;
+        const pnlColor = isProfit ? C.green : C.red;
+        const pnlBg = isProfit ? C.green + "18" : C.red + "18";
+        const priceDiff = isBull
+          ? currentPrice - activeSignal.entryPrice
+          : activeSignal.entryPrice - currentPrice;
+        return (
+          <View style={[styles.pnlPanel, { borderColor: pnlColor + "50", backgroundColor: pnlBg }]}>
+            <View style={styles.pnlLeft}>
+              <View style={[styles.pnlBadge, { backgroundColor: dirColor }]}>
+                <Text style={styles.pnlBadgeText}>{isBull ? "▲ BUY" : "▼ SELL"}</Text>
+              </View>
+              <View style={styles.pnlPriceCol}>
+                <Text style={styles.pnlPriceLabel}>Entry</Text>
+                <Text style={[styles.pnlPriceVal, { color: dirColor }]}>{activeSignal.entryPrice.toFixed(2)}</Text>
+              </View>
+              <View style={styles.pnlPriceCol}>
+                <Text style={styles.pnlPriceLabel}>Now</Text>
+                <Text style={styles.pnlPriceVal}>{currentPrice.toFixed(2)}</Text>
+              </View>
+              <View style={styles.pnlPriceCol}>
+                <Text style={styles.pnlPriceLabel}>Δ Pts</Text>
+                <Text style={[styles.pnlPriceVal, { color: pnlColor }]}>
+                  {priceDiff >= 0 ? "+" : ""}{priceDiff.toFixed(2)}
+                </Text>
+              </View>
+            </View>
+            <View style={styles.pnlRight}>
+              <Text style={styles.pnlLabel}>PnL · 0.01 lot</Text>
+              <Text style={[styles.pnlValue, { color: pnlColor }]}>
+                {isProfit ? "+" : ""}${pnl.toFixed(2)}
+              </Text>
+              <Text style={[styles.pnlStatus, { color: pnlColor }]}>
+                {isProfit ? "● PROFIT" : "● LOSS"}
+              </Text>
+            </View>
+          </View>
+        );
+      })()}
 
       {hasNoData && (
         <View style={styles.overlay}>
@@ -774,5 +836,67 @@ const styles = StyleSheet.create({
     color: C.textSub,
     textAlign: "center",
     paddingHorizontal: 20,
+  },
+  pnlPanel: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginHorizontal: 12,
+    marginBottom: 10,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  pnlLeft: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    flex: 1,
+  },
+  pnlBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 6,
+  },
+  pnlBadgeText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 11,
+    color: "#fff",
+    letterSpacing: 0.4,
+  },
+  pnlPriceCol: {
+    alignItems: "center",
+  },
+  pnlPriceLabel: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 8,
+    color: C.textDim,
+    marginBottom: 1,
+  },
+  pnlPriceVal: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 10,
+    color: C.text,
+  },
+  pnlRight: {
+    alignItems: "flex-end",
+  },
+  pnlLabel: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 8,
+    color: C.textDim,
+    marginBottom: 2,
+  },
+  pnlValue: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 20,
+    letterSpacing: 0.3,
+  },
+  pnlStatus: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 9,
+    marginTop: 1,
+    letterSpacing: 0.5,
   },
 });
