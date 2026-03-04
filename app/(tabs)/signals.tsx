@@ -22,15 +22,27 @@ function SignalItem({ signal }: { signal: TradingSignal }) {
     <View style={[styles.signalItem, { borderLeftColor: trendColor }]}>
       <View style={styles.signalTop}>
         <View style={styles.signalLeft}>
-          <View style={[styles.trendPill, { backgroundColor: trendColor + "20" }]}>
-            <Ionicons
-              name={isBull ? "trending-up" : "trending-down"}
-              size={12}
-              color={trendColor}
-            />
-            <Text style={[styles.trendPillText, { color: trendColor }]}>
-              {signal.trend.toUpperCase()}
-            </Text>
+          <View style={styles.pillsRow}>
+            <View style={[styles.trendPill, { backgroundColor: trendColor + "20" }]}>
+              <Ionicons
+                name={isBull ? "trending-up" : "trending-down"}
+                size={12}
+                color={trendColor}
+              />
+              <Text style={[styles.trendPillText, { color: trendColor }]}>
+                {signal.trend.toUpperCase()}
+              </Text>
+            </View>
+            <View style={[styles.confirmPill, { backgroundColor: trendColor + "15" }]}>
+              <Ionicons
+                name={signal.confirmationType === "engulfing" ? "layers" : "radio-button-on"}
+                size={10}
+                color={trendColor}
+              />
+              <Text style={[styles.confirmPillText, { color: trendColor }]}>
+                {signal.confirmationType === "engulfing" ? "ENGULFING" : "REJECTION"}
+              </Text>
+            </View>
           </View>
           <Text style={styles.pairText}>{signal.pair} · {signal.timeframe}</Text>
         </View>
@@ -202,6 +214,25 @@ const styles = StyleSheet.create({
   },
   signalLeft: {
     gap: 4,
+  },
+  pillsRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  confirmPill: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 7,
+    paddingVertical: 3,
+    borderRadius: 12,
+    alignSelf: "flex-start",
+  },
+  confirmPillText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 9,
+    letterSpacing: 0.6,
   },
   trendPill: {
     flexDirection: "row",

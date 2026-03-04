@@ -627,19 +627,19 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
     const confirmationType: ConfirmationType = isEngulfing ? "engulfing" : "rejection";
 
-    // SL/TP based on M15 ATR
+    // SL = Swing High/Low (100%/0%), TP = Swing Low/High (0%/100%)
     let sl: number;
     let tp: number;
     if (trend === "Bullish") {
-      sl = fibLevels.level786 - 0.5 * atr;
-      tp = fibLevels.extensionNeg27;
+      sl = fibLevels.swingLow;
+      tp = fibLevels.swingHigh;
     } else {
-      sl = fibLevels.level786 + 0.5 * atr;
-      tp = fibLevels.extensionNeg27;
+      sl = fibLevels.swingHigh;
+      tp = fibLevels.swingLow;
     }
 
     const slDistance = Math.abs(currentPrice - sl);
-    if (slDistance < atr * 0.05 * 3 || atr < 0.1) return null;
+    if (slDistance < atr * 0.1 || atr < 0.1) return null;
 
     const riskAmount = balance * 0.01;
     const lotSize = riskAmount / slDistance;

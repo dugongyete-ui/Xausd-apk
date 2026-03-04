@@ -40,9 +40,9 @@ function InfoRow({
   );
 }
 
-function StrategyRule({ title, detail }: { title: string; detail: string }) {
+function StrategyRule({ title, detail, isLast }: { title: string; detail: string; isLast?: boolean }) {
   return (
-    <View style={styles.ruleRow}>
+    <View style={[styles.ruleRow, isLast && styles.ruleRowLast]}>
       <View style={styles.ruleDot} />
       <View style={styles.ruleContent}>
         <Text style={styles.ruleTitle}>{title}</Text>
@@ -146,8 +146,8 @@ export default function SettingsScreen() {
             <InfoRow
               icon="database"
               label="M5 Candles"
-              value={`${candles.length} / 50`}
-              valueColor={candles.length >= 50 ? C.green : C.gold}
+              value={`${candles.length} / 10`}
+              valueColor={candles.length >= 10 ? C.green : C.gold}
             />
             <View style={styles.divider} />
             <InfoRow
@@ -176,7 +176,7 @@ export default function SettingsScreen() {
           <View style={styles.card}>
             <StrategyRule
               title="Data Source"
-              detail="Deriv WebSocket · XAUUSD M5 · 200 candles buffer"
+              detail="Deriv WebSocket · XAUUSD · M15: 300 candle struktur · M5: 100 candle konfirmasi"
             />
             <StrategyRule
               title="Trend Filter"
@@ -196,11 +196,11 @@ export default function SettingsScreen() {
             />
             <StrategyRule
               title="Stop Loss"
-              detail="SL = 78.6% ± (0.5 × ATR). Min distance: spread × 3"
+              detail="SL = Swing High (bearish) · Swing Low (bullish) — level 100%/0%"
             />
             <StrategyRule
               title="Take Profit"
-              detail="-27% Fibonacci extension (beyond the swing)"
+              detail="TP = Swing Low (bearish) · Swing High (bullish) — level 0%/100%"
             />
             <StrategyRule
               title="Position Size"
@@ -209,6 +209,7 @@ export default function SettingsScreen() {
             <StrategyRule
               title="Trade Filter"
               detail="Max 1 active signal · No entry on low ATR or extreme spread"
+              isLast
             />
           </View>
         </View>
@@ -238,6 +239,13 @@ export default function SettingsScreen() {
                     if (v) {
                       requestNotifications();
                       Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                    } else {
+                      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+                      Alert.alert(
+                        "Notifikasi Aktif",
+                        "Notifikasi tidak dapat dinonaktifkan dari sini. Matikan melalui pengaturan sistem perangkat Anda.",
+                        [{ text: "OK" }]
+                      );
                     }
                   }}
                   trackColor={{ false: C.border, true: C.goldBg }}
@@ -395,6 +403,9 @@ const styles = StyleSheet.create({
     padding: 14,
     borderBottomWidth: 1,
     borderBottomColor: C.border,
+  },
+  ruleRowLast: {
+    borderBottomWidth: 0,
   },
   ruleDot: {
     width: 6,

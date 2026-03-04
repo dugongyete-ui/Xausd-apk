@@ -132,9 +132,8 @@ export function FibChart() {
 
   const ema50Series = useMemo(() => {
     if (selectedTF === "M15") return ema50FromM15.slice(-VISIBLE_CANDLES);
-    if (candles.length < 50) return [];
-    return calcEMAFull(candles.map((c) => c.close), 50).slice(-VISIBLE_CANDLES);
-  }, [selectedTF, ema50FromM15, candles]);
+    return [];
+  }, [selectedTF, ema50FromM15]);
 
   const ema200Series = useMemo(() => {
     if (selectedTF === "M15") return ema200FromM15.slice(-VISIBLE_CANDLES);
@@ -215,7 +214,9 @@ export function FibChart() {
       {/* Header */}
       <View style={styles.header}>
         <View style={styles.headerLeft}>
-          <Text style={styles.title}>XAUUSD  ·  ANALISIS FIBONACCI</Text>
+          <Text style={styles.title}>
+            XAUUSD  ·  {selectedTF === "M15" ? "M15 STRUKTUR" : "M5 ENTRY"}
+          </Text>
         </View>
         <Text style={[styles.trendLabel, { color: trendColor }]}>{trendLabel}</Text>
       </View>
@@ -283,7 +284,7 @@ export function FibChart() {
             <Path d={emaPath(ema50Series, ema50Series.length)} stroke="#A78BFA" strokeWidth={1.5} fill="none" opacity={0.85} />
           )}
 
-          {/* EMA lines (M5 chart — drawn as horizontal M15 EMA reference lines) */}
+          {/* EMA lines (M5 chart — drawn as horizontal M15 EMA reference lines only, strategy uses M15 EMA) */}
           {selectedTF === "M5" && m15Ema200Val !== null && (
             <LabeledLine
               label="M15 EMA200"
@@ -303,9 +304,6 @@ export function FibChart() {
               lo={lo} hi={hi} plotH={plotH} plotW={plotW}
               dashed strokeWidth={1.5}
             />
-          )}
-          {selectedTF === "M5" && ema50Series.length > 0 && (
-            <Path d={emaPath(ema50Series, ema50Series.length)} stroke="#A78BFA" strokeWidth={1} fill="none" opacity={0.5} strokeDasharray="4,2" />
           )}
 
           {/* Candlesticks */}
@@ -361,48 +359,53 @@ export function FibChart() {
           })()}
 
           {/* Fibonacci lines */}
-          {fibLevels && (
-            <>
-              <LabeledLine
-                label="▲ SWING HIGH"
-                sublabel={`${fibLevels.swingHigh.toFixed(2)}`}
-                price={fibLevels.swingHigh}
-                color={C.green}
-                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed={false} strokeWidth={1.5} showArrow="up"
-              />
-              <LabeledLine
-                label="61.8% ZONA ATAS"
-                price={fibLevels.level618}
-                color={C.gold}
-                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed strokeWidth={1}
-              />
-              <LabeledLine
-                label="78.6% ZONA BAWAH"
-                price={fibLevels.level786}
-                color={C.gold}
-                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed strokeWidth={1}
-              />
-              <LabeledLine
-                label="▼ SWING LOW"
-                sublabel={`${fibLevels.swingLow.toFixed(2)}`}
-                price={fibLevels.swingLow}
-                color={C.red}
-                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed={false} strokeWidth={1.5} showArrow="down"
-              />
-              <LabeledLine
-                label="★ TARGET -27%"
-                sublabel="Take Profit Fibonacci"
-                price={fibLevels.extensionNeg27}
-                color={C.blue}
-                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed strokeWidth={1.5}
-              />
-            </>
-          )}
+          {fibLevels && (() => {
+            const level618IsHigher = fibLevels.level618 > fibLevels.level786;
+            const label618 = level618IsHigher ? "61.8% ZONA ATAS" : "61.8% ZONA BAWAH";
+            const label786 = level618IsHigher ? "78.6% ZONA BAWAH" : "78.6% ZONA ATAS";
+            return (
+              <>
+                <LabeledLine
+                  label="▲ SWING HIGH"
+                  sublabel={`${fibLevels.swingHigh.toFixed(2)}`}
+                  price={fibLevels.swingHigh}
+                  color={C.green}
+                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                  dashed={false} strokeWidth={1.5} showArrow="up"
+                />
+                <LabeledLine
+                  label={label618}
+                  price={fibLevels.level618}
+                  color={C.gold}
+                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                  dashed strokeWidth={1}
+                />
+                <LabeledLine
+                  label={label786}
+                  price={fibLevels.level786}
+                  color={C.gold}
+                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                  dashed strokeWidth={1}
+                />
+                <LabeledLine
+                  label="▼ SWING LOW"
+                  sublabel={`${fibLevels.swingLow.toFixed(2)}`}
+                  price={fibLevels.swingLow}
+                  color={C.red}
+                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                  dashed={false} strokeWidth={1.5} showArrow="down"
+                />
+                <LabeledLine
+                  label="-27% REFERENSI"
+                  sublabel="Extension Target"
+                  price={fibLevels.extensionNeg27}
+                  color={C.blue}
+                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                  dashed strokeWidth={1}
+                />
+              </>
+            );
+          })()}
 
           {/* Signal lines */}
           {currentSignal && (
@@ -459,7 +462,7 @@ export function FibChart() {
         <LegItem color={C.green} label="Swing H ▲" />
         <LegItem color={C.red} label="Swing L ▼" />
         <LegItem color={C.gold} label="Zona Entry" box />
-        <LegItem color={C.blue} label="-27% Target" />
+        <LegItem color={C.blue} label="-27% Ref" />
         <LegItem color="#A78BFA" label="EMA50" line />
         <LegItem color="#F97316" label="EMA200" line />
         {currentSignal && <LegItem color={C.red} label="Stop Loss" />}

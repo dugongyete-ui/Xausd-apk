@@ -175,19 +175,23 @@ function EMARow() {
 
   return (
     <View style={styles.emaRow}>
-      {/* M15 candle progress */}
-      <View style={styles.emaItem}>
-        <Text style={styles.emaLabel}>M15</Text>
-        <Text style={[styles.emaValue, { color: m15Candles.length >= 200 ? C.green : C.gold }]}>
-          {m15Candles.length}/300
-        </Text>
-      </View>
       {/* EMA 50 from M15 */}
       <View style={styles.emaItem}>
         <Text style={styles.emaLabel}>EMA50·M15</Text>
         {ema50 !== null ? (
           <Text style={[styles.emaValue, { color: lastClose !== null && ema50 < lastClose ? C.green : C.red }]}>
             {ema50.toFixed(1)}
+          </Text>
+        ) : (
+          <Text style={[styles.emaValue, { color: C.textDim }]}>—</Text>
+        )}
+      </View>
+      {/* EMA 200 from M15 */}
+      <View style={styles.emaItem}>
+        <Text style={styles.emaLabel}>EMA200·M15</Text>
+        {ema200 !== null ? (
+          <Text style={[styles.emaValue, { color: lastClose !== null && ema200 < lastClose ? C.green : C.red }]}>
+            {ema200.toFixed(1)}
           </Text>
         ) : (
           <Text style={[styles.emaValue, { color: C.textDim }]}>—</Text>
@@ -237,7 +241,7 @@ function FibLevelsCard() {
       pct: "0%",
     },
     {
-      label: "-27% Target",
+      label: "-27% Referensi",
       value: fibLevels.extensionNeg27,
       color: C.blue,
       pct: "-27%",
