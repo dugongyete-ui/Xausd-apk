@@ -14,10 +14,9 @@ import Svg, {
 import C from "@/constants/colors";
 import { useTrading, calcEMAFull } from "@/contexts/TradingContext";
 
-const CHART_HEIGHT = 300;
-const RIGHT_W = 82;
-const TOP_PAD = 14;
-const BOT_PAD = 14;
+const RIGHT_W = 84;
+const TOP_PAD = 16;
+const BOT_PAD = 16;
 
 type TF = "M15" | "M5";
 const VISIBLE: Record<TF, number> = { M15: 30, M5: 40 };
@@ -116,6 +115,8 @@ export function FibChart() {
   const { candles, m15Candles, fibLevels, currentPrice, currentSignal, activeSignal, trend, atr } = useTrading();
   const [chartW, setChartW] = useState(0);
   const [selectedTF, setSelectedTF] = useState<TF>("M15");
+  // Responsive chart height: ~75% of width, minimum 300px, max 450px
+  const CHART_HEIGHT = chartW > 0 ? Math.min(450, Math.max(300, Math.round(chartW * 0.75))) : 300;
   const visibleCount = VISIBLE[selectedTF];
 
   const visibleCandles = useMemo(() => {
@@ -568,6 +569,8 @@ function LegItem({ color, label, line = false, box = false }: { color: string; l
 
 const styles = StyleSheet.create({
   wrapper: {
+    width: "100%",
+    alignSelf: "stretch",
     backgroundColor: C.card,
     borderRadius: 16,
     borderWidth: 1,
