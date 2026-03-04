@@ -52,6 +52,7 @@ interface FibLineProps {
   dashed?: boolean;
   strokeWidth?: number;
   labelSide?: "left" | "right";
+  edgeOffsetY?: number;
 }
 
 function FibLine({
@@ -65,9 +66,47 @@ function FibLine({
   dashed = true,
   strokeWidth = 1,
   labelSide = "left",
+  edgeOffsetY = 0,
 }: FibLineProps) {
   const y = priceToY(price, lo, hi, plotH);
-  if (y < TOP_PAD - 6 || y > TOP_PAD + plotH + 6) return null;
+  const inView = y >= TOP_PAD - 4 && y <= TOP_PAD + plotH + 4;
+
+  // Out-of-view: draw edge indicator arrow + label at chart boundary
+  // edgeOffsetY allows stacking multiple off-screen labels without overlap
+  if (!inView) {
+    const isAbove = y < TOP_PAD;
+    const baseY = isAbove ? TOP_PAD + 2 : TOP_PAD + plotH - 14;
+    const ey = isAbove ? baseY + edgeOffsetY : baseY - edgeOffsetY;
+    const arrow = isAbove ? "▲" : "▼";
+    const shortLabel = label.split("·")[0].trim();
+    const badgeText = `${arrow} ${shortLabel} ${price.toFixed(1)}`;
+    const badgeW = Math.min(badgeText.length * 5.4 + 8, plotW - 4);
+    const bx = 2;
+    return (
+      <G>
+        <Rect
+          x={bx}
+          y={ey}
+          width={badgeW}
+          height={13}
+          fill={color + "28"}
+          rx={3}
+          stroke={color}
+          strokeWidth={0.7}
+          opacity={0.95}
+        />
+        <SvgText
+          x={bx + 4}
+          y={ey + 9}
+          fill={color}
+          fontSize={7}
+          fontWeight="bold"
+        >
+          {badgeText}
+        </SvgText>
+      </G>
+    );
+  }
 
   const labelW = Math.min(label.length * 5.5 + 8, plotW - 4);
   const lx = labelSide === "left" ? 2 : plotW - labelW - 4;
@@ -146,6 +185,7 @@ export function FibChart() {
     currentSignal,
     activeSignal,
     trend,
+    atr,
   } = useTrading();
 
   const [chartW, setChartW] = useState(0);
@@ -180,8 +220,9 @@ export function FibChart() {
     return isNaN(v) ? null : v;
   }, [ema200Series]);
 
-  // ── Price range: based purely on visible candles + small padding ──────────
-  // Do NOT expand for fib levels — that squishes candles. Lines outside are clipped.
+  // ── Price range: candle-focused with smart fib expansion ────────────────────
+  // Candles are the primary reference — range stays proportional for scalping.
+  // Levels outside the view are shown as edge indicators by FibLine (arrow badges).
   const { lo, hi } = useMemo(() => {
     if (visibleCandles.length === 0) {
       return { lo: 3200, hi: 3300 };
@@ -189,17 +230,17 @@ export function FibChart() {
     let loV = Math.min(...visibleCandles.map((c) => c.low));
     let hiV = Math.max(...visibleCandles.map((c) => c.high));
 
-    // Only include fib zone if it is very close to the candle range.
-    // Max expansion: 1× the current candle height — prevents zone far below/above
-    // from squishing candles. Lines outside this view are clipped by FibLine.
     if (fibLevels) {
-      const candleH = hiV - loV;
+      const candleH = hiV - loV || 10;
+      // Always include the full fib zone (61.8% – 78.6%) — this is where trades happen
       const zoneHi = Math.max(fibLevels.level618, fibLevels.level786);
       const zoneLo = Math.min(fibLevels.level618, fibLevels.level786);
-      // Only pull chart UP if zone top is above candles but within 1× candle height
-      if (zoneHi > hiV && zoneHi - hiV < candleH) hiV = zoneHi;
-      // Only pull chart DOWN if zone bottom is below candles but within 1× candle height
-      if (zoneLo < loV && loV - zoneLo < candleH) loV = zoneLo;
+      if (zoneHi > hiV) hiV = zoneHi;
+      if (zoneLo < loV) loV = zoneLo;
+      // Expand for swing extremes only if within 2× candle height — keeps candles readable
+      if (fibLevels.swingHigh > hiV && fibLevels.swingHigh - hiV < candleH * 2) hiV = fibLevels.swingHigh;
+      if (fibLevels.swingLow < loV && loV - fibLevels.swingLow < candleH * 2) loV = fibLevels.swingLow;
+      // Levels further away (swingLow, extensionNeg27) show as edge indicators
     }
 
     // Current price must always be in view
@@ -208,7 +249,7 @@ export function FibChart() {
       hiV = Math.max(hiV, currentPrice);
     }
 
-    const pad = (hiV - loV) * 0.1;
+    const pad = (hiV - loV) * 0.08;
     return { lo: loV - pad, hi: hiV + pad };
   }, [visibleCandles, fibLevels, currentPrice]);
 
@@ -286,16 +327,23 @@ export function FibChart() {
         ))}
       </View>
 
-      {/* Candle count info */}
+      {/* Candle count info + ATR */}
       <View style={styles.infoRow}>
         <Text style={styles.infoText}>
-          M15: {m15Candles.length} candle · M5: {candles.length} candle
+          M15: {m15Candles.length} · M5: {candles.length} candle
         </Text>
-        {fibLevels && (
-          <Text style={styles.infoText}>
-            Zona: {Math.min(fibLevels.level618, fibLevels.level786).toFixed(1)}–{Math.max(fibLevels.level618, fibLevels.level786).toFixed(1)}
-          </Text>
-        )}
+        <View style={styles.infoRight}>
+          {atr !== null && (
+            <Text style={[styles.infoText, styles.atrBadge]}>
+              ATR(14): {atr.toFixed(2)}
+            </Text>
+          )}
+          {fibLevels && (
+            <Text style={styles.infoText}>
+              Zona: {Math.min(fibLevels.level618, fibLevels.level786).toFixed(1)}–{Math.max(fibLevels.level618, fibLevels.level786).toFixed(1)}
+            </Text>
+          )}
+        </View>
       </View>
 
       {chartW > 0 && (
@@ -401,44 +449,28 @@ export function FibChart() {
           {/* ── Fibonacci Structure Lines ── */}
           {fibLevels && (() => {
             const trendUp = trend === "Bullish";
-            // Color system — consistent, trader-friendly:
-            //   Swing extreme (origin of move) → Purple
-            //   61.8% zone boundary            → Gold
-            //   78.6% zone boundary            → Orange
-            //   SL reference (swing opposite)  → Red
-            //   TP target (-27% extension)      → Green
-            const SWING_ORIGIN_COLOR = "#C084FC"; // Purple — start of the swing
-            const ZONE_618_COLOR     = "#F0B429"; // Gold — primary entry zone
-            const ZONE_786_COLOR     = "#F97316"; // Orange — deep retracement zone
-            const SL_REF_COLOR       = "#EF4444"; // Red — SL reference level
-            const TP_TARGET_COLOR    = "#22C55E"; // Green — take profit target
+            const SWING_ORIGIN_COLOR = "#C084FC"; // Purple — origin of the move (0%)
+            const ZONE_618_COLOR     = "#F0B429"; // Gold   — 61.8% Golden Retracement
+            const ZONE_786_COLOR     = "#F97316"; // Orange — 78.6% Deep Retracement
+            const SL_REF_COLOR       = "#EF4444"; // Red    — 100% SL Reference
+            const TP_TARGET_COLOR    = "#22C55E"; // Green  — -27% Take Profit Extension
             return (
               <>
-                {/* Swing High (Bearish: origin of move / Bullish: opposite extreme) */}
+                {/* 100% — Swing High */}
                 <FibLine
                   label={trendUp
-                    ? "Swing High · Origin"
-                    : "Swing High · Origin (SL Ref)"}
+                    ? "0.0% · Swing High (Support)"
+                    : "100% · Swing High (SL Ref)"}
                   price={fibLevels.swingHigh}
                   color={trendUp ? SWING_ORIGIN_COLOR : SL_REF_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed={false}
-                  strokeWidth={1.5}
-                />
-
-                {/* 61.8% — Golden Retracement */}
-                <FibLine
-                  label="61.8% · Entry Zone (Atas)"
-                  price={fibLevels.level618}
-                  color={ZONE_618_COLOR}
-                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                  dashed
-                  strokeWidth={1.3}
+                  strokeWidth={1.8}
                 />
 
                 {/* 78.6% — Deep Retracement */}
                 <FibLine
-                  label="78.6% · Entry Zone (Bawah)"
+                  label={trendUp ? "78.6% · Deep Retracement" : "78.6% · Deep Retracement"}
                   price={fibLevels.level786}
                   color={ZONE_786_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
@@ -446,26 +478,38 @@ export function FibChart() {
                   strokeWidth={1.3}
                 />
 
-                {/* Swing Low (Bullish: origin / Bearish: opposite extreme) */}
+                {/* 61.8% — Golden Retracement */}
+                <FibLine
+                  label="61.8% · Golden Retracement"
+                  price={fibLevels.level618}
+                  color={ZONE_618_COLOR}
+                  lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                  dashed
+                  strokeWidth={1.3}
+                />
+
+                {/* 0% — Swing Low */}
                 <FibLine
                   label={trendUp
-                    ? "Swing Low · Origin (SL Ref)"
-                    : "Swing Low · Origin"}
+                    ? "100% · Swing Low (SL Ref)"
+                    : "0.0% · Swing Low (Support)"}
                   price={fibLevels.swingLow}
                   color={trendUp ? SL_REF_COLOR : SWING_ORIGIN_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed={false}
-                  strokeWidth={1.5}
+                  strokeWidth={1.8}
+                  edgeOffsetY={16}
                 />
 
-                {/* -27% Extension — Take Profit Target (always GREEN) */}
+                {/* -27% Extension — Take Profit Target */}
                 <FibLine
-                  label="TP · -27% Extension"
+                  label="-27% Extension (Take Profit)"
                   price={fibLevels.extensionNeg27}
                   color={TP_TARGET_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed
-                  strokeWidth={1.8}
+                  strokeWidth={2}
+                  edgeOffsetY={0}
                 />
               </>
             );
@@ -801,13 +845,23 @@ const styles = StyleSheet.create({
   infoRow: {
     flexDirection: "row",
     justifyContent: "space-between",
+    alignItems: "center",
     paddingHorizontal: 12,
     paddingVertical: 4,
+  },
+  infoRight: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
   },
   infoText: {
     fontFamily: "Inter_400Regular",
     fontSize: 9.5,
     color: C.textDim,
+  },
+  atrBadge: {
+    color: "#A78BFA",
+    fontFamily: "Inter_600SemiBold",
   },
   legend: {
     flexDirection: "row",
