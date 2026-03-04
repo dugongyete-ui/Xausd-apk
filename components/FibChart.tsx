@@ -14,8 +14,8 @@ import Svg, {
 import C from "@/constants/colors";
 import { useTrading, calcEMAFull } from "@/contexts/TradingContext";
 
-const CHART_HEIGHT = 400;
-const RIGHT_W = 62;
+const CHART_HEIGHT = 520;
+const RIGHT_W = 86;
 const TOP_PAD = 16;
 const BOT_PAD = 16;
 
@@ -69,94 +69,57 @@ function FibLine({
   edgeOffsetY = 0,
 }: FibLineProps) {
   const y = priceToY(price, lo, hi, plotH);
-  const inView = y >= TOP_PAD - 4 && y <= TOP_PAD + plotH + 4;
+  if (y < TOP_PAD - 4 || y > TOP_PAD + plotH + 4) return null;
 
-  // Out-of-view: draw edge indicator arrow + label at chart boundary
-  // edgeOffsetY allows stacking multiple off-screen labels without overlap
-  if (!inView) {
-    const isAbove = y < TOP_PAD;
-    const baseY = isAbove ? TOP_PAD + 2 : TOP_PAD + plotH - 14;
-    const ey = isAbove ? baseY + edgeOffsetY : baseY - edgeOffsetY;
-    const arrow = isAbove ? "▲" : "▼";
-    const shortLabel = label.split("·")[0].trim();
-    const badgeText = `${arrow} ${shortLabel} ${price.toFixed(1)}`;
-    const badgeW = Math.min(badgeText.length * 5.4 + 8, plotW - 4);
-    const bx = 2;
-    return (
-      <G>
-        <Rect
-          x={bx}
-          y={ey}
-          width={badgeW}
-          height={13}
-          fill={color + "28"}
-          rx={3}
-          stroke={color}
-          strokeWidth={0.7}
-          opacity={0.95}
-        />
-        <SvgText
-          x={bx + 4}
-          y={ey + 9}
-          fill={color}
-          fontSize={7}
-          fontWeight="bold"
-        >
-          {badgeText}
-        </SvgText>
-      </G>
-    );
-  }
-
-  const labelW = Math.min(label.length * 5.5 + 8, plotW - 4);
-  const lx = labelSide === "left" ? 2 : plotW - labelW - 4;
+  // Extract short pct tag (before "·") and description (after "·")
+  const parts = label.split("·");
+  const pctTag = parts[0].trim();   // e.g. "78.6%", "100%", "-27%"
+  const descTag = parts[1]?.trim(); // e.g. "Deep Retracement", "Swing High (SL Ref)"
 
   return (
     <G>
+      {/* Colored tick on left edge */}
+      <Rect x={0} y={y - strokeWidth} width={4} height={strokeWidth * 2 + 1} fill={color} opacity={0.9} />
+
+      {/* Horizontal line across chart */}
       {dashed ? (
         <Path
-          d={dashedPath(0, y, plotW - 1)}
+          d={dashedPath(4, y, plotW - 1)}
           stroke={color}
           strokeWidth={strokeWidth}
-          opacity={0.8}
+          opacity={0.75}
         />
       ) : (
         <Line
-          x1={0}
+          x1={4}
           y1={y}
           x2={plotW - 1}
           y2={y}
           stroke={color}
           strokeWidth={strokeWidth}
-          opacity={0.95}
+          opacity={0.9}
         />
       )}
-      <Rect
-        x={lx}
-        y={y - 9}
-        width={labelW}
-        height={13}
-        fill="#0A0E17"
-        opacity={0.78}
-        rx={3}
-      />
+
+      {/* RIGHT panel — pct tag on top line, price below */}
       <SvgText
-        x={lx + 4}
-        y={y + 1}
+        x={plotW + 4}
+        y={y - 2}
         fill={color}
-        fontSize={7.5}
+        fontSize={6.5}
         fontWeight="bold"
+        opacity={0.85}
       >
-        {label}
+        {pctTag}
       </SvgText>
       <SvgText
-        x={plotW + 2}
-        y={y + 4}
+        x={plotW + 4}
+        y={y + 8}
         fill={color}
-        fontSize={7.5}
+        fontSize={8}
         fontWeight="bold"
       >
-        {price.toFixed(1)}
+        {price.toFixed(2)}
       </SvgText>
     </G>
   );
@@ -231,13 +194,10 @@ export function FibChart() {
     let hiV = Math.max(...visibleCandles.map((c) => c.high));
 
     if (fibLevels) {
-      // Only expand for the entry zone (61.8%–78.6%) — this is always relevant for scalping.
-      // Swing extremes and TP extension are shown as edge indicators when off-screen.
-      // This keeps candles at full readable scale, like TradingView's responsive chart.
-      const zoneHi = Math.max(fibLevels.level618, fibLevels.level786);
-      const zoneLo = Math.min(fibLevels.level618, fibLevels.level786);
-      if (zoneHi > hiV) hiV = zoneHi;
-      if (zoneLo < loV) loV = zoneLo;
+      // Include ALL fib levels so every line is visible — like TradingView's full structure view.
+      // The chart is taller (520px) so candles stay readable even with a wider price range.
+      hiV = Math.max(hiV, fibLevels.swingHigh, fibLevels.level618, fibLevels.level786);
+      loV = Math.min(loV, fibLevels.swingLow, fibLevels.extensionNeg27);
     }
 
     // Current price must always be in view
@@ -246,7 +206,7 @@ export function FibChart() {
       hiV = Math.max(hiV, currentPrice);
     }
 
-    const pad = (hiV - loV) * 0.08;
+    const pad = (hiV - loV) * 0.05;
     return { lo: loV - pad, hi: hiV + pad };
   }, [visibleCandles, fibLevels, currentPrice]);
 
@@ -495,18 +455,16 @@ export function FibChart() {
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed={false}
                   strokeWidth={1.8}
-                  edgeOffsetY={16}
                 />
 
                 {/* -27% Extension — Take Profit Target */}
                 <FibLine
-                  label="-27% Extension (Take Profit)"
+                  label="-27% · Extension (Take Profit)"
                   price={fibLevels.extensionNeg27}
                   color={TP_TARGET_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed
                   strokeWidth={2}
-                  edgeOffsetY={0}
                 />
               </>
             );
