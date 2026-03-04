@@ -20,7 +20,7 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 ### Frontend (Expo / React Native)
 - **Framework**: Expo Router (file-based routing)
 - **State**: React Context (`TradingContext`) for all trading engine state
-- **Font**: Inter (Google Fonts via @expo-google-fonts/inter)
+- **Fonts**: Inter (body/UI) + **Orbitron** (brand name LIBARTIN — futuristic trading font)
 - **Theme**: Dark navy trading terminal (#0A0E17 bg, #F0B429 gold accent)
 - **Navigation**: 3-tab layout (Dashboard, Signals, Settings)
 
@@ -83,6 +83,15 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 - Pair, Timeframe, Trend, Entry Price, Stop Loss, Take Profit
 - Risk:Reward Ratio, Lot Size, Timestamp UTC
 - Fibonacci Levels (High, Low, 61.8%, 78.6%, -27%)
+- **Outcome**: `"pending"` (default) → `"win"` (TP hit) / `"loss"` (SL hit) — auto-tracked in real-time
+- **Status**: `"active"` → `"closed"` after TP/SL hit
+
+## Win Rate Dashboard (Signals Tab)
+- Real-time win rate percentage: wins / closed signals × 100%
+- Color coded: ≥60% green, ≥45% gold, <45% red
+- Stats: Total | Win | Loss | Open (pending) counts
+- Visual progress bar: green (wins) vs red (losses)
+- Each signal card shows outcome badge: WIN (green) / LOSS (red) / PENDING (blue)
 
 ## Fibonacci Chart (FibChart component)
 
@@ -175,6 +184,16 @@ Atau cek di: https://expo.dev/accounts/[username]/projects/fibotrader/builds
 ## Dependencies
 - expo, expo-router, expo-blur, expo-haptics, expo-glass-effect
 - @tanstack/react-query, @react-native-async-storage/async-storage
-- @expo-google-fonts/inter, @expo/vector-icons
+- @expo-google-fonts/inter, @expo-google-fonts/orbitron, @expo/vector-icons
 - react-native-reanimated, react-native-safe-area-context
 - react-native-keyboard-controller, react-native-gesture-handler
+- expo-background-fetch, expo-task-manager (background signal monitoring)
+- expo-notifications (push + local signal/TP/SL alerts)
+
+## Background & Push Notification Architecture
+- **When app is OPEN**: Local WebSocket + local notifications (instant)
+- **When app is MINIMIZED**: AppState "active" listener auto-reconnects WebSocket on resume
+- **When app is CLOSED**: Backend server (24/7) detects signals → sends Expo Push Notification to device
+- **Android permissions**: RECEIVE_BOOT_COMPLETED, FOREGROUND_SERVICE, WAKE_LOCK, POST_NOTIFICATIONS
+- **Background fetch**: Registered with `stopOnTerminate: false, startOnBoot: true` for periodic wakeups
+- **Sound**: All notifications use sound + max vibration priority on Android channels

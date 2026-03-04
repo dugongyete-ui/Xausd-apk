@@ -440,9 +440,10 @@ const styles = StyleSheet.create({
   },
   aboutText: { flex: 1 },
   aboutTitle: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 16,
-    color: C.text,
+    fontFamily: "Orbitron_900Black",
+    fontSize: 15,
+    color: C.gold,
+    letterSpacing: 1.5,
     marginBottom: 4,
   },
   aboutSub: {

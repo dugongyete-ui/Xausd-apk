@@ -595,16 +595,17 @@ const styles = StyleSheet.create({
     paddingTop: 8,
   },
   headerTitle: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 22,
-    color: C.text,
-    letterSpacing: 0.3,
+    fontFamily: "Orbitron_900Black",
+    fontSize: 18,
+    color: C.gold,
+    letterSpacing: 2,
   },
   headerSub: {
     fontFamily: "Inter_400Regular",
-    fontSize: 12,
+    fontSize: 11,
     color: C.textSub,
     marginTop: 2,
+    letterSpacing: 0.3,
   },
   statusRow: {
     flexDirection: "row",

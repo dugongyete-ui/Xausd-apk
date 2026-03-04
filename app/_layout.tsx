@@ -5,6 +5,14 @@ import {
   Inter_700Bold,
   useFonts,
 } from "@expo-google-fonts/inter";
+import {
+  Orbitron_400Regular,
+  Orbitron_500Medium,
+  Orbitron_600SemiBold,
+  Orbitron_700Bold,
+  Orbitron_800ExtraBold,
+  Orbitron_900Black,
+} from "@expo-google-fonts/orbitron";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
@@ -28,6 +36,12 @@ const FONT_MAP =
         Inter_500Medium,
         Inter_600SemiBold,
         Inter_700Bold,
+        Orbitron_400Regular,
+        Orbitron_500Medium,
+        Orbitron_600SemiBold,
+        Orbitron_700Bold,
+        Orbitron_800ExtraBold,
+        Orbitron_900Black,
       };
 
 function RootLayoutNav() {

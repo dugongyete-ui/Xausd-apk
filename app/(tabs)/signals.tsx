@@ -14,12 +14,220 @@ import * as Haptics from "expo-haptics";
 import C from "@/constants/colors";
 import { useTrading, TradingSignal } from "@/contexts/TradingContext";
 
+function OutcomeBadge({ outcome }: { outcome?: "win" | "loss" | "pending" }) {
+  if (!outcome || outcome === "pending") {
+    return (
+      <View style={[outcomeBadgeStyles.badge, { backgroundColor: "rgba(59,130,246,0.15)" }]}>
+        <View style={[outcomeBadgeStyles.dot, { backgroundColor: C.blue }]} />
+        <Text style={[outcomeBadgeStyles.text, { color: C.blue }]}>PENDING</Text>
+      </View>
+    );
+  }
+  if (outcome === "win") {
+    return (
+      <View style={[outcomeBadgeStyles.badge, { backgroundColor: "rgba(16,185,129,0.15)" }]}>
+        <Ionicons name="checkmark-circle" size={11} color={C.green} />
+        <Text style={[outcomeBadgeStyles.text, { color: C.green }]}>WIN</Text>
+      </View>
+    );
+  }
+  return (
+    <View style={[outcomeBadgeStyles.badge, { backgroundColor: "rgba(239,68,68,0.15)" }]}>
+      <Ionicons name="close-circle" size={11} color={C.red} />
+      <Text style={[outcomeBadgeStyles.text, { color: C.red }]}>LOSS</Text>
+    </View>
+  );
+}
+
+const outcomeBadgeStyles = StyleSheet.create({
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 20,
+    alignSelf: "flex-start",
+  },
+  dot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+  },
+  text: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 9,
+    letterSpacing: 1.2,
+  },
+});
+
+function WinRateCard({ signals }: { signals: TradingSignal[] }) {
+  const closed = signals.filter((s) => s.outcome === "win" || s.outcome === "loss");
+  const wins = signals.filter((s) => s.outcome === "win").length;
+  const losses = signals.filter((s) => s.outcome === "loss").length;
+  const pending = signals.filter((s) => !s.outcome || s.outcome === "pending").length;
+  const winRate = closed.length > 0 ? Math.round((wins / closed.length) * 100) : null;
+
+  const rateColor =
+    winRate === null ? C.textSub :
+    winRate >= 60 ? C.green :
+    winRate >= 45 ? C.gold :
+    C.red;
+
+  return (
+    <View style={wrStyles.card}>
+      <View style={wrStyles.winRateRow}>
+        <View style={wrStyles.winRateMain}>
+          <Text style={wrStyles.wrLabel}>WIN RATE</Text>
+          {winRate !== null ? (
+            <Text style={[wrStyles.wrValue, { color: rateColor }]}>{winRate}%</Text>
+          ) : (
+            <Text style={[wrStyles.wrValue, { color: C.textDim }]}>—</Text>
+          )}
+        </View>
+        <View style={wrStyles.divider} />
+        <View style={wrStyles.statBlock}>
+          <Text style={wrStyles.statNumber}>{signals.length}</Text>
+          <Text style={wrStyles.statLabel}>TOTAL</Text>
+        </View>
+        <View style={wrStyles.statBlock}>
+          <Text style={[wrStyles.statNumber, { color: C.green }]}>{wins}</Text>
+          <Text style={wrStyles.statLabel}>WIN</Text>
+        </View>
+        <View style={wrStyles.statBlock}>
+          <Text style={[wrStyles.statNumber, { color: C.red }]}>{losses}</Text>
+          <Text style={wrStyles.statLabel}>LOSS</Text>
+        </View>
+        <View style={wrStyles.statBlock}>
+          <Text style={[wrStyles.statNumber, { color: C.blue }]}>{pending}</Text>
+          <Text style={wrStyles.statLabel}>OPEN</Text>
+        </View>
+      </View>
+
+      {closed.length > 0 && (
+        <View style={wrStyles.barContainer}>
+          <View style={wrStyles.barTrack}>
+            {wins > 0 && (
+              <View
+                style={[
+                  wrStyles.barFill,
+                  {
+                    flex: wins,
+                    backgroundColor: C.green,
+                    borderTopLeftRadius: 4,
+                    borderBottomLeftRadius: 4,
+                    borderTopRightRadius: losses === 0 ? 4 : 0,
+                    borderBottomRightRadius: losses === 0 ? 4 : 0,
+                  },
+                ]}
+              />
+            )}
+            {losses > 0 && (
+              <View
+                style={[
+                  wrStyles.barFill,
+                  {
+                    flex: losses,
+                    backgroundColor: C.red,
+                    borderTopRightRadius: 4,
+                    borderBottomRightRadius: 4,
+                    borderTopLeftRadius: wins === 0 ? 4 : 0,
+                    borderBottomLeftRadius: wins === 0 ? 4 : 0,
+                  },
+                ]}
+              />
+            )}
+          </View>
+        </View>
+      )}
+    </View>
+  );
+}
+
+const wrStyles = StyleSheet.create({
+  card: {
+    backgroundColor: C.card,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: C.border,
+    padding: 16,
+    marginHorizontal: 16,
+    marginBottom: 12,
+    gap: 12,
+  },
+  winRateRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 0,
+  },
+  winRateMain: {
+    flex: 1.5,
+    alignItems: "flex-start",
+    gap: 2,
+  },
+  wrLabel: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 9,
+    color: C.textDim,
+    letterSpacing: 1.5,
+  },
+  wrValue: {
+    fontFamily: "Orbitron_800ExtraBold",
+    fontSize: 30,
+    letterSpacing: -1,
+    lineHeight: 36,
+  },
+  divider: {
+    width: 1,
+    height: 40,
+    backgroundColor: C.border,
+    marginHorizontal: 12,
+  },
+  statBlock: {
+    flex: 1,
+    alignItems: "center",
+    gap: 3,
+  },
+  statNumber: {
+    fontFamily: "Orbitron_700Bold",
+    fontSize: 18,
+    color: C.text,
+    lineHeight: 22,
+  },
+  statLabel: {
+    fontFamily: "Inter_500Medium",
+    fontSize: 8,
+    color: C.textDim,
+    letterSpacing: 1.2,
+  },
+  barContainer: {
+    gap: 4,
+  },
+  barTrack: {
+    flexDirection: "row",
+    height: 6,
+    borderRadius: 4,
+    overflow: "hidden",
+    backgroundColor: C.border,
+  },
+  barFill: {
+    height: 6,
+  },
+});
+
 function SignalItem({ signal }: { signal: TradingSignal }) {
   const isBull = signal.trend === "Bullish";
   const trendColor = isBull ? C.green : C.red;
 
   return (
-    <View style={[styles.signalItem, { borderLeftColor: trendColor }]}>
+    <View
+      style={[
+        styles.signalItem,
+        { borderLeftColor: trendColor },
+        signal.outcome === "win" && { borderColor: "rgba(16,185,129,0.25)" },
+        signal.outcome === "loss" && { borderColor: "rgba(239,68,68,0.20)" },
+      ]}
+    >
       <View style={styles.signalTop}>
         <View style={styles.signalLeft}>
           <View style={styles.pillsRow}>
@@ -43,6 +251,7 @@ function SignalItem({ signal }: { signal: TradingSignal }) {
                 {signal.confirmationType === "engulfing" ? "ENGULFING" : "REJECTION"}
               </Text>
             </View>
+            <OutcomeBadge outcome={signal.outcome} />
           </View>
           <Text style={styles.pairText}>{signal.pair} · {signal.timeframe}</Text>
         </View>
@@ -96,12 +305,12 @@ export default function SignalsScreen() {
   const handleClear = () => {
     if (Platform.OS !== "web") {
       Alert.alert(
-        "Clear History",
-        "Delete all signal history?",
+        "Hapus History",
+        "Hapus semua riwayat sinyal?",
         [
-          { text: "Cancel", style: "cancel" },
+          { text: "Batal", style: "cancel" },
           {
-            text: "Delete",
+            text: "Hapus",
             style: "destructive",
             onPress: () => {
               Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
@@ -120,7 +329,7 @@ export default function SignalsScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.headerTitle}>Signal History</Text>
-          <Text style={styles.headerSub}>{signalHistory.length} signals recorded</Text>
+          <Text style={styles.headerSub}>{signalHistory.length} sinyal tercatat</Text>
         </View>
         {signalHistory.length > 0 && (
           <Pressable
@@ -139,12 +348,17 @@ export default function SignalsScreen() {
         data={signalHistory}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => <SignalItem signal={item} />}
+        ListHeaderComponent={
+          signalHistory.length > 0 ? (
+            <WinRateCard signals={signalHistory} />
+          ) : null
+        }
         contentContainerStyle={[
           styles.listContent,
           { paddingBottom: botPad + 16 },
         ]}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!!signalHistory.length}
+        scrollEnabled
         ListEmptyComponent={
           <View style={styles.emptyState}>
             <View style={styles.emptyIcon}>
@@ -154,9 +368,9 @@ export default function SignalsScreen() {
                 color={C.textDim}
               />
             </View>
-            <Text style={styles.emptyTitle}>No Signals Yet</Text>
+            <Text style={styles.emptyTitle}>Belum Ada Sinyal</Text>
             <Text style={styles.emptySub}>
-              Signals appear here when all conditions are met: trend, Fibonacci zone, and candle confirmation.
+              Sinyal muncul ketika semua kondisi terpenuhi: trend, zona Fibonacci, dan konfirmasi candle.
             </Text>
           </View>
         }
@@ -214,11 +428,13 @@ const styles = StyleSheet.create({
   },
   signalLeft: {
     gap: 4,
+    flex: 1,
   },
   pillsRow: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
+    flexWrap: "wrap",
   },
   confirmPill: {
     flexDirection: "row",

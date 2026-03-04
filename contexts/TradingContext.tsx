@@ -9,7 +9,9 @@ import React, {
   ReactNode,
 } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
-import { Platform } from "react-native";
+import { Platform, AppState } from "react-native";
+import * as BackgroundFetch from "expo-background-fetch";
+import * as TaskManager from "expo-task-manager";
 import {
   requestNotificationPermission,
   getExpoPushToken,
@@ -17,6 +19,14 @@ import {
   sendTPAlert,
   sendSLAlert,
 } from "@/services/NotificationService";
+
+const BACKGROUND_FETCH_TASK = "libartin-bg-fetch";
+
+if (Platform.OS !== "web") {
+  TaskManager.defineTask(BACKGROUND_FETCH_TASK, async () => {
+    return BackgroundFetch.BackgroundFetchResult.NewData;
+  });
+}
 
 // Backend URL — server yang jalan 24/7 untuk kirim push ke device
 const BACKEND_URL = (() => {
@@ -85,6 +95,7 @@ export interface TradingSignal {
   status: "active" | "closed";
   signalCandleEpoch: number;
   confirmationType: ConfirmationType;
+  outcome?: "win" | "loss" | "pending";
 }
 
 export type TrendState = "Bullish" | "Bearish" | "No Trade" | "Loading";
@@ -112,6 +123,7 @@ interface TradingContextValue {
   marketNextOpen: string;
   notificationEnabled: boolean;
   requestNotifications: () => void;
+  updateSignalOutcome: (id: string, outcome: "win" | "loss") => void;
 }
 
 const TradingContext = createContext<TradingContextValue | null>(null);
@@ -516,7 +528,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
           }
         }
       });
+
+      // Register background fetch task untuk wakeup periodik
+      BackgroundFetch.registerTaskAsync(BACKGROUND_FETCH_TASK, {
+        minimumInterval: 15 * 60,
+        stopOnTerminate: false,
+        startOnBoot: true,
+      }).catch(() => {});
     }
+
   }, []);
 
   const setBalance = useCallback((b: number) => {
@@ -528,10 +548,21 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const saveSignal = useCallback((sig: TradingSignal, key: string) => {
     if (savedSignalKeys.current.has(key)) return;
     savedSignalKeys.current.add(key);
+    const sigWithOutcome: TradingSignal = { ...sig, outcome: "pending" };
     setSignalHistory((prev) => {
-      const next = [sig, ...prev];
+      const next = [sigWithOutcome, ...prev];
       AsyncStorage.setItem(STORAGE_KEY_SIGNALS, JSON.stringify(next));
       return next;
+    });
+  }, []);
+
+  const updateSignalOutcome = useCallback((id: string, outcome: "win" | "loss") => {
+    setSignalHistory((prev) => {
+      const updated = prev.map((s) =>
+        s.id === id ? { ...s, outcome, status: "closed" as const } : s
+      );
+      AsyncStorage.setItem(STORAGE_KEY_SIGNALS, JSON.stringify(updated));
+      return updated;
     });
   }, []);
 
@@ -744,7 +775,22 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
     }, 30_000);
 
+    // Reconnect WebSocket ketika app kembali ke foreground (dari background)
+    const appStateSub = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        const wsState = wsRef.current?.readyState;
+        const disconnected = wsState === undefined || wsState === WebSocket.CLOSED || wsState === WebSocket.CLOSING;
+        if (disconnected && forexMarketOpen() && !derivMarketClosedRef.current) {
+          connect();
+        }
+        if (pushTokenRef.current) {
+          registerPushTokenWithBackend(pushTokenRef.current).catch(() => {});
+        }
+      }
+    });
+
     return () => {
+      appStateSub.remove();
       if (reconnectTimer.current) clearTimeout(reconnectTimer.current);
       if (marketCheckTimer.current) clearInterval(marketCheckTimer.current);
       if (wsRef.current) wsRef.current.close();
@@ -898,6 +944,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       status: "active",
       signalCandleEpoch: closedM5.epoch,
       confirmationType,
+      outcome: "pending",
     };
   }, [fibLevels, atr, trend, currentPrice, m5Candles, balance, marketState, currentAnchorEpoch]);
 
@@ -934,7 +981,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     sl: false,
   });
   useEffect(() => {
-    if (!currentSignal || currentPrice === null || !notificationEnabled || Platform.OS === "web") return;
+    if (!currentSignal || currentPrice === null) return;
     const tracked = tpSlNotifiedRef.current;
     if (tracked.id !== currentSignal.id) {
       tpSlNotifiedRef.current = { id: currentSignal.id, tp: false, sl: false };
@@ -949,12 +996,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         : currentPrice <= currentSignal.takeProfit;
       if (tpHit) {
         tpSlNotifiedRef.current.tp = true;
-        sendTPAlert({
-          trend: currentSignal.trend,
-          entryPrice: currentSignal.entryPrice,
-          takeProfit: currentSignal.takeProfit,
-          currentPrice,
-        }).catch(() => {});
+        tpSlNotifiedRef.current.sl = true;
+        updateSignalOutcome(currentSignal.id, "win");
+        if (notificationEnabled && Platform.OS !== "web") {
+          sendTPAlert({
+            trend: currentSignal.trend,
+            entryPrice: currentSignal.entryPrice,
+            takeProfit: currentSignal.takeProfit,
+            currentPrice,
+          }).catch(() => {});
+        }
       }
     }
 
@@ -965,15 +1016,19 @@ export function TradingProvider({ children }: { children: ReactNode }) {
         : currentPrice >= currentSignal.stopLoss;
       if (slHit) {
         tpSlNotifiedRef.current.sl = true;
-        sendSLAlert({
-          trend: currentSignal.trend,
-          entryPrice: currentSignal.entryPrice,
-          stopLoss: currentSignal.stopLoss,
-          currentPrice,
-        }).catch(() => {});
+        tpSlNotifiedRef.current.tp = true;
+        updateSignalOutcome(currentSignal.id, "loss");
+        if (notificationEnabled && Platform.OS !== "web") {
+          sendSLAlert({
+            trend: currentSignal.trend,
+            entryPrice: currentSignal.entryPrice,
+            stopLoss: currentSignal.stopLoss,
+            currentPrice,
+          }).catch(() => {});
+        }
       }
     }
-  }, [currentPrice, currentSignal, notificationEnabled]);
+  }, [currentPrice, currentSignal, notificationEnabled, updateSignalOutcome]);
 
   const value = useMemo(
     () => ({
@@ -996,12 +1051,13 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       marketNextOpen,
       notificationEnabled,
       requestNotifications,
+      updateSignalOutcome,
     }),
     [
       m5Candles, m15Candles, currentPrice, ema50, ema200, trend,
       fibLevels, currentSignal, signalHistory, atr, connectionStatus,
       balance, setBalance, inZone, clearHistory, marketState, marketNextOpen,
-      notificationEnabled, requestNotifications,
+      notificationEnabled, requestNotifications, updateSignalOutcome,
     ]
   );
 
