@@ -231,16 +231,13 @@ export function FibChart() {
     let hiV = Math.max(...visibleCandles.map((c) => c.high));
 
     if (fibLevels) {
-      const candleH = hiV - loV || 10;
-      // Always include the full fib zone (61.8% – 78.6%) — this is where trades happen
+      // Only expand for the entry zone (61.8%–78.6%) — this is always relevant for scalping.
+      // Swing extremes and TP extension are shown as edge indicators when off-screen.
+      // This keeps candles at full readable scale, like TradingView's responsive chart.
       const zoneHi = Math.max(fibLevels.level618, fibLevels.level786);
       const zoneLo = Math.min(fibLevels.level618, fibLevels.level786);
       if (zoneHi > hiV) hiV = zoneHi;
       if (zoneLo < loV) loV = zoneLo;
-      // Expand for swing extremes only if within 2× candle height — keeps candles readable
-      if (fibLevels.swingHigh > hiV && fibLevels.swingHigh - hiV < candleH * 2) hiV = fibLevels.swingHigh;
-      if (fibLevels.swingLow < loV && loV - fibLevels.swingLow < candleH * 2) loV = fibLevels.swingLow;
-      // Levels further away (swingLow, extensionNeg27) show as edge indicators
     }
 
     // Current price must always be in view
