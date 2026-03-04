@@ -44,6 +44,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
     });
   });
 
+  // Debug: force emit a test signal to all registered push tokens
+  app.post("/api/test-signal", (_req: Request, res: Response) => {
+    const snapshot = derivService.getSnapshot();
+    const price = snapshot.currentPrice ?? 5180;
+    const fib = snapshot.fibLevels;
+    const trend = (snapshot.trend === "Bullish" || snapshot.trend === "Bearish")
+      ? snapshot.trend
+      : "Bearish";
+    const sl = fib ? (trend === "Bearish" ? fib.swingHigh : fib.swingLow) : price + (trend === "Bearish" ? 15 : -15);
+    const tp = fib ? fib.extensionNeg27 : price - (trend === "Bearish" ? 20 : -20);
+    const slDist = Math.abs(price - sl);
+    const tpDist = Math.abs(tp - price);
+    const rr = slDist > 0 ? Math.round((tpDist / slDist) * 100) / 100 : 1.5;
+    derivService.injectTestSignal({ price, trend, sl, tp, rr });
+    res.json({ ok: true, price, trend, sl, tp, rr, tokens: derivService.getTokenCount() });
+  });
+
   const httpServer = createServer(app);
   return httpServer;
 }

@@ -112,6 +112,9 @@ interface TradingContextValue {
   trend: TrendState;
   fibLevels: FibLevels | null;
   currentSignal: TradingSignal | null;
+  // activeSignal: sinyal aktif yang sedang di-track TP/SL
+  // Berbeda dari currentSignal — tetap ada sampai TP/SL tercapai
+  activeSignal: TradingSignal | null;
   signalHistory: TradingSignal[];
   atr: number | null;
   connectionStatus: "connecting" | "connected" | "disconnected";
@@ -124,6 +127,8 @@ interface TradingContextValue {
   notificationEnabled: boolean;
   requestNotifications: () => void;
   updateSignalOutcome: (id: string, outcome: "win" | "loss") => void;
+  injectDemoSignal: (type: "BUY" | "SELL") => void;
+  clearDemoSignal: () => void;
 }
 
 const TradingContext = createContext<TradingContextValue | null>(null);
@@ -215,43 +220,38 @@ function calcATR(candles: Candle[], period: number): number {
 }
 
 // ─── Swing Detection ──────────────────────────────────────────────────────────
-// 3 aturan kritis yang dijaga:
+// Responsif terhadap pergerakan market terbaru.
 //
-// ① Hanya candle CLOSED:
-//    Loop mulai dari n-4, bukan n-3.
-//    Dengan begitu slice[i+1] dan slice[i+2] sudah closed.
-//    slice[n-1] adalah candle live yang sedang berjalan — tidak pernah dipakai
-//    sebagai right neighbor fractal sehingga fractal tidak bisa repaint.
+// ANCHOR (titik utama Fibonacci):
+//   Bearish → Fractal HIGH terbaru (5-bar: high[i] > 4 neighbors, EMA50 < EMA200)
+//   Bullish → Fractal LOW terbaru (5-bar: low[i] < 4 neighbors, EMA50 > EMA200)
+//   Loop dari n-4: right neighbors sudah closed, live candle tidak disentuh.
+//   Ini mencegah repaint: anchor tidak berubah selama candle masih live.
 //
-// ② Fractal hanya valid jika SEARAH trend:
-//    EMA50 vs EMA200 dicek PADA SAAT candle fractal terbentuk (bukan saat ini).
-//    Bearish: EMA50 < EMA200 di candle fractal high.
-//    Bullish: EMA50 > EMA200 di candle fractal low.
-//    Fractal yang terjadi sebelum trend berubah otomatis dilewati.
+// PAIR EXTREME (ujung range Fibonacci):
+//   Bearish → SwingLow  = LOW TERKECIL dalam 80 candle SEBELUM anchor
+//   Bullish → SwingHigh = HIGH TERBESAR dalam 80 candle SEBELUM anchor
+//   Tidak perlu fractal — cukup extreme price aktual.
+//   Ini membuat Fibonacci responsif: ketika market cetak low baru,
+//   SwingLow langsung update dan zona Fib bergeser.
 //
-// ③ Pasangan pivot juga harus fractal (simetris):
-//    Bearish: Fractal HIGH → Fractal LOW sebelum high (bukan absolute lowest low).
-//    Bullish: Fractal LOW  → Fractal HIGH sebelum low (bukan absolute highest high).
-//
-// anchorEpoch = epoch candle fractal anchor → kunci stabilitas Fibonacci.
-// Fibonacci hanya update ketika anchorEpoch berubah (fractal baru terbentuk).
+// anchorEpoch = epoch candle fractal → kunci non-repaint anchor.
 function findSwings(
   candles: Candle[],
   trend: "Bullish" | "Bearish"
 ): { swingHigh: number; swingLow: number; anchorEpoch: number } | null {
   const LOOKBACK = Math.min(candles.length, 100);
+  const PAIR_LOOKBACK = 80;
   const slice = candles.slice(-LOOKBACK);
   const n = slice.length;
   if (n < 10) return null;
 
-  // Hitung EMA full-length untuk cek alignment trend di setiap index
   const closes = candles.map((c) => c.close);
   const ema50Full = calcEMAFull(closes, EMA50_PERIOD);
   const ema200Full = calcEMAFull(closes, EMA200_PERIOD);
-  const offset = candles.length - LOOKBACK; // slice[i] === candles[offset + i]
+  const offset = candles.length - LOOKBACK;
 
   if (trend === "Bearish") {
-    // ① Loop mulai n-4: right neighbors sudah closed, live candle tidak disentuh
     for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingHigh =
@@ -259,51 +259,35 @@ function findSwings(
         c.high > slice[i + 1].high && c.high > slice[i + 2].high;
       if (!isSwingHigh) continue;
 
-      // ② Cek alignment trend di candle fractal: EMA50 < EMA200 (bearish)
       const absI = offset + i;
       const e50 = ema50Full[absI];
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 >= e200) continue;
 
-      // ③ Cari fractal LOW TERDEKAT sebelum fractal HIGH ini
-      //    Chronological rule: Low(lama) → High(baru) harus single-leg bersih.
-      //    Setelah menemukan fractal LOW di index j, verifikasi tidak ada
-      //    fractal HIGH lain di antara j dan i (yang akan membuatnya tumpang tindih).
-      let pairLowIdx: number | null = null;
-      let pairLow: number | null = null;
-      for (let j = i - 2; j >= 4; j--) {
-        const p = slice[j];
-        const isFractalLow =
-          p.low < slice[j - 1].low && p.low < slice[j - 2].low &&
-          p.low < slice[j + 1].low && p.low < slice[j + 2].low;
-        if (isFractalLow) {
-          pairLowIdx = j;
-          pairLow = p.low;
+      // SwingLow = local trough terbaru sebelum anchor (asal impulse naik ke fractal high ini).
+      // Cari 3-bar local low dari dekat anchor ke belakang; fallback ke min 20 candle.
+      const searchStart = Math.max(1, i - PAIR_LOOKBACK);
+      let swingLow: number | null = null;
+      for (let j = i - 1; j >= searchStart; j--) {
+        const prevLow = j > 0 ? slice[j - 1].low : slice[j].low;
+        const nextLow = slice[j + 1].low;
+        if (slice[j].low <= prevLow && slice[j].low <= nextLow) {
+          swingLow = slice[j].low;
           break;
         }
       }
-      if (pairLowIdx === null || pairLow === null) continue;
-
-      // Validasi chronological: tidak boleh ada fractal HIGH lain di antara
-      // pairLow (j) dan fractal HIGH saat ini (i). Kalau ada → tumpang tindih.
-      let hasIntermediateHigh = false;
-      for (let k = pairLowIdx + 2; k <= i - 2; k++) {
-        if (k < 2 || k + 2 >= n) continue;
-        if (
-          slice[k].high > slice[k - 1].high && slice[k].high > slice[k - 2].high &&
-          slice[k].high > slice[k + 1].high && slice[k].high > slice[k + 2].high
-        ) {
-          hasIntermediateHigh = true;
-          break;
-        }
+      if (swingLow === null) {
+        const fb = Math.max(0, i - 20);
+        let mn = Infinity;
+        for (let j = fb; j < i; j++) if (slice[j].low < mn) mn = slice[j].low;
+        if (mn !== Infinity) swingLow = mn;
       }
-      if (hasIntermediateHigh) continue;
+      if (swingLow === null) continue;
+      if (c.high - swingLow < 5) continue;
 
-      if (c.high - pairLow < 5) continue;
-      return { swingHigh: c.high, swingLow: pairLow, anchorEpoch: c.epoch };
+      return { swingHigh: c.high, swingLow, anchorEpoch: c.epoch };
     }
   } else {
-    // ① Loop mulai n-4: right neighbors sudah closed
     for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingLow =
@@ -311,47 +295,33 @@ function findSwings(
         c.low < slice[i + 1].low && c.low < slice[i + 2].low;
       if (!isSwingLow) continue;
 
-      // ② Cek alignment trend di candle fractal: EMA50 > EMA200 (bullish)
       const absI = offset + i;
       const e50 = ema50Full[absI];
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 <= e200) continue;
 
-      // ③ Cari fractal HIGH TERDEKAT sebelum fractal LOW ini
-      //    Chronological rule: High(lama) → Low(baru) harus single-leg bersih.
-      //    Verifikasi tidak ada fractal LOW lain di antara j dan i.
-      let pairHighIdx: number | null = null;
-      let pairHigh: number | null = null;
-      for (let j = i - 2; j >= 4; j--) {
-        const p = slice[j];
-        const isFractalHigh =
-          p.high > slice[j - 1].high && p.high > slice[j - 2].high &&
-          p.high > slice[j + 1].high && p.high > slice[j + 2].high;
-        if (isFractalHigh) {
-          pairHighIdx = j;
-          pairHigh = p.high;
+      // SwingHigh = local peak terbaru sebelum anchor (asal impulse turun ke fractal low ini).
+      // Cari 3-bar local high dari dekat anchor ke belakang; fallback ke max 20 candle.
+      const searchStart = Math.max(1, i - PAIR_LOOKBACK);
+      let swingHigh: number | null = null;
+      for (let j = i - 1; j >= searchStart; j--) {
+        const prevHigh = j > 0 ? slice[j - 1].high : slice[j].high;
+        const nextHigh = slice[j + 1].high;
+        if (slice[j].high >= prevHigh && slice[j].high >= nextHigh) {
+          swingHigh = slice[j].high;
           break;
         }
       }
-      if (pairHighIdx === null || pairHigh === null) continue;
-
-      // Validasi chronological: tidak boleh ada fractal LOW lain di antara
-      // pairHigh (j) dan fractal LOW saat ini (i). Kalau ada → tumpang tindih.
-      let hasIntermediateLow = false;
-      for (let k = pairHighIdx + 2; k <= i - 2; k++) {
-        if (k < 2 || k + 2 >= n) continue;
-        if (
-          slice[k].low < slice[k - 1].low && slice[k].low < slice[k - 2].low &&
-          slice[k].low < slice[k + 1].low && slice[k].low < slice[k + 2].low
-        ) {
-          hasIntermediateLow = true;
-          break;
-        }
+      if (swingHigh === null) {
+        const fb = Math.max(0, i - 20);
+        let mx = -Infinity;
+        for (let j = fb; j < i; j++) if (slice[j].high > mx) mx = slice[j].high;
+        if (mx !== -Infinity) swingHigh = mx;
       }
-      if (hasIntermediateLow) continue;
+      if (swingHigh === null) continue;
+      if (swingHigh - c.low < 5) continue;
 
-      if (pairHigh - c.low < 5) continue;
-      return { swingHigh: pairHigh, swingLow: c.low, anchorEpoch: c.epoch };
+      return { swingHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
   }
   return null;
@@ -376,17 +346,18 @@ function calcFib(swingHigh: number, swingLow: number, trend: "Bullish" | "Bearis
 }
 
 // ─── M5 Entry confirmation ───────────────────────────────────────────────────
-// Rejection Pin Bar — strict 5-condition filter:
+// Rejection Pin Bar — 4-condition filter:
 // ① Candle arah sesuai trend (bullish close / bearish close)
 // ② Wick dominan ≥ 1.5× body
 // ③ Body berada di sisi yang benar dari midpoint candle
-// ④ Ujung wick menyentuh level 78.6% (toleransi 0.1%)
+// ④ Wick menyentuh/masuk zona Fibonacci (lo–hi)
 // Hanya candle CLOSED yang boleh dievaluasi (dipastikan dari caller)
-function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: number): boolean {
+function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", fib: FibLevels): boolean {
   const body = Math.abs(candle.close - candle.open);
   if (body === 0) return false;
   const midpoint = (candle.high + candle.low) / 2;
-  const tolerance = level786 * 0.001; // 0.1% dari level 78.6%
+  const lo = Math.min(fib.level618, fib.level786);
+  const hi = Math.max(fib.level618, fib.level786);
 
   if (trend === "Bullish") {
     if (candle.close <= candle.open) return false;
@@ -394,7 +365,8 @@ function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: 
     if (lowerWick < body * 1.5) return false;
     const bodyCenter = (candle.open + candle.close) / 2;
     if (bodyCenter <= midpoint) return false;
-    if (Math.abs(candle.low - level786) > tolerance) return false;
+    // Lower wick harus mencapai zona (candle low <= hi)
+    if (candle.low > hi) return false;
     return true;
   }
   if (candle.close >= candle.open) return false;
@@ -402,7 +374,8 @@ function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: 
   if (upperWick < body * 1.5) return false;
   const bodyCenter = (candle.open + candle.close) / 2;
   if (bodyCenter >= midpoint) return false;
-  if (Math.abs(candle.high - level786) > tolerance) return false;
+  // Upper wick harus mencapai zona (candle high >= lo)
+  if (candle.high < lo) return false;
   return true;
 }
 
@@ -448,6 +421,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [currentPrice, setCurrentPrice] = useState<number | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<"connecting" | "connected" | "disconnected">("connecting");
   const [signalHistory, setSignalHistory] = useState<TradingSignal[]>([]);
+  // activeSignal: sinyal yang sedang aktif untuk tracking TP/SL
+  // Tetap ada setelah currentSignal null (karena single-position rule)
+  // Reset ketika TP/SL tercapai atau anchor baru terbentuk
+  const [activeSignal, setActiveSignal] = useState<TradingSignal | null>(null);
   const [balance, setBalanceState] = useState<number>(10000);
   const [marketState, setMarketState] = useState<MarketState>(forexMarketOpen() ? "open" : "closed");
   const [marketNextOpen, setMarketNextOpen] = useState(nextOpenDesc());
@@ -463,10 +440,10 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   // Single position rule: track anchorEpoch yang sudah menghasilkan signal
   // Satu signal per fractal anchor — blok signal baru sampai anchor berubah
   const lastSignaledAnchorRef = useRef<number | null>(null);
-  // FIBONACCI STABILITY RULE: track last swing to avoid recalculating every candle
-  // anchorEpoch = epoch of the fractal candle (the TRUE stability key).
-  // Fibonacci updates ONLY when a new fractal pivot forms, not when price drifts.
-  const lastSwingRef = useRef<{ anchorEpoch: number; trend: string } | null>(null);
+  // Track last swing: anchorEpoch (fractal candle epoch) + pairValue (swingLow/swingHigh).
+  // Fibonacci updates when EITHER anchor changes (new fractal) OR pairValue changes
+  // (market made new extreme → zone shifts responsively).
+  const lastSwingRef = useRef<{ anchorEpoch: number; trend: string; pairValue: number } | null>(null);
 
   // ─── Startup: load all cached data instantly ──────────────────────────────
   useEffect(() => {
@@ -854,9 +831,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
 
     const last = lastSwingRef.current;
-    if (!last || last.trend !== trend || last.anchorEpoch !== swings.anchorEpoch) {
-      lastSwingRef.current = { anchorEpoch: swings.anchorEpoch, trend };
-      setCurrentAnchorEpoch(swings.anchorEpoch);
+    const pairValue = trend === "Bearish" ? swings.swingLow : swings.swingHigh;
+    const anchorChanged = !last || last.trend !== trend || last.anchorEpoch !== swings.anchorEpoch;
+    const pairChanged  = last && last.anchorEpoch === swings.anchorEpoch && last.pairValue !== pairValue;
+
+    if (anchorChanged || pairChanged) {
+      lastSwingRef.current = { anchorEpoch: swings.anchorEpoch, trend, pairValue };
+      // Reset signal lock hanya jika anchor benar-benar berubah (bukan sekedar pair update)
+      if (anchorChanged) {
+        setCurrentAnchorEpoch(swings.anchorEpoch);
+      }
       setFibLevels(calcFib(swings.swingHigh, swings.swingLow, trend as "Bullish" | "Bearish"));
     }
   }, [m15Candles, trend]);
@@ -870,12 +854,11 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   }, [fibLevels, currentPrice]);
 
   // ─── Signal detection: M15 zone + M5 confirmation ─────────────────────────
-  // 5 aturan entry:
+  // 4 aturan entry:
   // ① Hanya evaluasi candle M5 CLOSED (m5Candles[n-2], bukan n-1 yang masih live)
-  // ② Rejection strength filter: wick ≥ 1.5× body, body di sisi benar, wick sentuh 78.6%
-  // ③ Zone priority: entry prioritas di dekat 78.6% (dicek dalam checkRejection)
-  // ④ Volatility filter: ATR M5 ≥ M5_ATR_MIN
-  // ⑤ Single position: blok signal baru jika anchor yang sama sudah punya signal
+  // ② Zone check: candle CLOSED harus menyentuh zona Fibonacci (bukan harga live)
+  // ③ Rejection/Engulfing: wick ≥ 1.5× body, body di sisi benar, wick masuk zona
+  // ④ Single position: blok signal baru jika anchor yang sama sudah punya signal
   const currentSignal = useMemo((): TradingSignal | null => {
     if (
       !fibLevels || !atr || atr <= 0 ||
@@ -884,25 +867,31 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       marketState === "closed" || currentAnchorEpoch === null
     ) return null;
 
-    // ⑤ Single position rule: satu signal per fractal anchor
+    // ④ Single position rule: satu signal per fractal anchor
     if (lastSignaledAnchorRef.current === currentAnchorEpoch) return null;
-
-    const lo = Math.min(fibLevels.level618, fibLevels.level786);
-    const hi = Math.max(fibLevels.level618, fibLevels.level786);
-    if (currentPrice < lo || currentPrice > hi) return null;
 
     // ① Gunakan candle CLOSED: n-2 (candle closed terakhir), n-3 (sebelumnya)
     const closedM5 = m5Candles[m5Candles.length - 2];
     const prevM5   = m5Candles[m5Candles.length - 3];
     const trendDir = trend as "Bullish" | "Bearish";
 
-    // ④ Volatility filter: ATR M5 harus cukup besar
+    const lo = Math.min(fibLevels.level618, fibLevels.level786);
+    const hi = Math.max(fibLevels.level618, fibLevels.level786);
+
+    // ② Zone check: pakai candle CLOSED (bukan harga live)
+    // Bearish SELL: wick atas closedM5 harus masuk ke zona
+    // Bullish BUY : wick bawah closedM5 harus masuk ke zona
+    const candleTouchesZone = trendDir === "Bearish"
+      ? closedM5.high >= lo
+      : closedM5.low <= hi;
+    if (!candleTouchesZone) return null;
+
+    // Volatility filter: ATR M5 harus cukup besar
     const m5ATR = calcATR(m5Candles.slice(0, -1), ATR_PERIOD);
     if (m5ATR < M5_ATR_MIN) return null;
 
-    // ② & ③ Rejection pin bar (strict: wick ≥ 1.5×, body di sisi benar, sentuh 78.6%)
-    const isRejection = checkRejection(closedM5, trendDir, fibLevels.level786);
-    // Engulfing: closedM5 engulf prev (keduanya sudah closed)
+    // ③ Rejection pin bar atau Engulfing pattern
+    const isRejection = checkRejection(closedM5, trendDir, fibLevels);
     const isEngulfing = checkEngulfing(prevM5, closedM5, trendDir);
     if (!isRejection && !isEngulfing) return null;
 
@@ -952,8 +941,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     if (currentSignal && currentAnchorEpoch !== null) {
       saveSignal(currentSignal, currentSignal.id);
       lastSignaledAnchorRef.current = currentAnchorEpoch;
+      // Simpan sebagai activeSignal untuk TP/SL tracking
+      setActiveSignal(currentSignal);
     }
   }, [currentSignal?.id, saveSignal, currentAnchorEpoch]);
+
+  // Ketika anchor baru terbentuk, clear activeSignal yang lama
+  // (anchor baru = sinyal baru akan menggantikan)
+  useEffect(() => {
+    setActiveSignal(null);
+  }, [currentAnchorEpoch]);
 
   // ─── Notify when a NEW signal appears ─────────────────────────────────────
   const prevSignalIdRef = useRef<string | null>(null);
@@ -975,34 +972,37 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   }, [currentSignal?.id, notificationEnabled]);
 
   // ─── Track TP/SL hit for active signal ────────────────────────────────────
+  // Pakai activeSignal (bukan currentSignal) supaya tracking tetap berjalan
+  // meskipun currentSignal sudah null (karena single-position rule)
   const tpSlNotifiedRef = useRef<{ id: string; tp: boolean; sl: boolean }>({
     id: "",
     tp: false,
     sl: false,
   });
   useEffect(() => {
-    if (!currentSignal || currentPrice === null) return;
+    if (!activeSignal || currentPrice === null) return;
     const tracked = tpSlNotifiedRef.current;
-    if (tracked.id !== currentSignal.id) {
-      tpSlNotifiedRef.current = { id: currentSignal.id, tp: false, sl: false };
+    if (tracked.id !== activeSignal.id) {
+      tpSlNotifiedRef.current = { id: activeSignal.id, tp: false, sl: false };
     }
 
-    const isBull = currentSignal.trend === "Bullish";
+    const isBull = activeSignal.trend === "Bullish";
 
     // Check TP hit
     if (!tpSlNotifiedRef.current.tp) {
       const tpHit = isBull
-        ? currentPrice >= currentSignal.takeProfit
-        : currentPrice <= currentSignal.takeProfit;
+        ? currentPrice >= activeSignal.takeProfit
+        : currentPrice <= activeSignal.takeProfit;
       if (tpHit) {
         tpSlNotifiedRef.current.tp = true;
         tpSlNotifiedRef.current.sl = true;
-        updateSignalOutcome(currentSignal.id, "win");
+        updateSignalOutcome(activeSignal.id, "win");
+        setActiveSignal(null);
         if (notificationEnabled && Platform.OS !== "web") {
           sendTPAlert({
-            trend: currentSignal.trend,
-            entryPrice: currentSignal.entryPrice,
-            takeProfit: currentSignal.takeProfit,
+            trend: activeSignal.trend,
+            entryPrice: activeSignal.entryPrice,
+            takeProfit: activeSignal.takeProfit,
             currentPrice,
           }).catch(() => {});
         }
@@ -1012,23 +1012,67 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     // Check SL hit
     if (!tpSlNotifiedRef.current.sl) {
       const slHit = isBull
-        ? currentPrice <= currentSignal.stopLoss
-        : currentPrice >= currentSignal.stopLoss;
+        ? currentPrice <= activeSignal.stopLoss
+        : currentPrice >= activeSignal.stopLoss;
       if (slHit) {
         tpSlNotifiedRef.current.sl = true;
         tpSlNotifiedRef.current.tp = true;
-        updateSignalOutcome(currentSignal.id, "loss");
+        updateSignalOutcome(activeSignal.id, "loss");
+        setActiveSignal(null);
         if (notificationEnabled && Platform.OS !== "web") {
           sendSLAlert({
-            trend: currentSignal.trend,
-            entryPrice: currentSignal.entryPrice,
-            stopLoss: currentSignal.stopLoss,
+            trend: activeSignal.trend,
+            entryPrice: activeSignal.entryPrice,
+            stopLoss: activeSignal.stopLoss,
             currentPrice,
           }).catch(() => {});
         }
       }
     }
-  }, [currentPrice, currentSignal, notificationEnabled, updateSignalOutcome]);
+  }, [currentPrice, activeSignal, notificationEnabled, updateSignalOutcome]);
+
+  // ─── Demo / Test Signal ────────────────────────────────────────────────────
+  const injectDemoSignal = React.useCallback((type: "BUY" | "SELL") => {
+    const price = currentPrice ?? 5180;
+    const range = 20;
+    const isBuy = type === "BUY";
+    const swingLow  = isBuy ? price - range : price - range * 0.4;
+    const swingHigh = isBuy ? price + range * 0.4 : price + range;
+    const sl = isBuy ? swingLow - 2 : swingHigh + 2;
+    const tp = isBuy ? price + range * 1.5 : price - range * 1.5;
+    const rr = parseFloat((Math.abs(tp - price) / Math.abs(sl - price)).toFixed(2));
+    const mockFib: FibLevels = {
+      swingHigh,
+      swingLow,
+      level618: isBuy ? swingLow + (swingHigh - swingLow) * 0.382 : swingLow + (swingHigh - swingLow) * 0.618,
+      level786: isBuy ? swingLow + (swingHigh - swingLow) * 0.214 : swingLow + (swingHigh - swingLow) * 0.786,
+      extensionNeg27: tp,
+    };
+    const demoId = `demo-${Date.now()}`;
+    const demo: TradingSignal = {
+      id: demoId,
+      pair: "XAUUSD",
+      timeframe: "M5",
+      trend: isBuy ? "Bullish" : "Bearish",
+      entryPrice: price,
+      stopLoss: sl,
+      takeProfit: tp,
+      riskReward: rr,
+      lotSize: 0.01,
+      timestampUTC: new Date().toUTCString(),
+      fibLevels: mockFib,
+      status: "active",
+      signalCandleEpoch: Math.floor(Date.now() / 1000),
+      confirmationType: "rejection",
+      outcome: "pending",
+    };
+    setActiveSignal(demo);
+    saveSignal(demo, demoId);
+  }, [currentPrice, saveSignal]);
+
+  const clearDemoSignal = React.useCallback(() => {
+    setActiveSignal(null);
+  }, []);
 
   const value = useMemo(
     () => ({
@@ -1040,6 +1084,7 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       trend,
       fibLevels,
       currentSignal,
+      activeSignal,
       signalHistory,
       atr,
       connectionStatus,
@@ -1052,12 +1097,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       notificationEnabled,
       requestNotifications,
       updateSignalOutcome,
+      injectDemoSignal,
+      clearDemoSignal,
     }),
     [
       m5Candles, m15Candles, currentPrice, ema50, ema200, trend,
-      fibLevels, currentSignal, signalHistory, atr, connectionStatus,
+      fibLevels, currentSignal, activeSignal, signalHistory, atr, connectionStatus,
       balance, setBalance, inZone, clearHistory, marketState, marketNextOpen,
       notificationEnabled, requestNotifications, updateSignalOutcome,
+      injectDemoSignal, clearDemoSignal,
     ]
   );
 

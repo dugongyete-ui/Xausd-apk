@@ -71,13 +71,24 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 - Levels: 61.8%, 78.6%, -27% extension
 - Fibonacci does NOT update every candle — tracked via lastSwingRef
 ### 5. Entry (ENTRY VALIDATION RULE on M5):
-- SELL: Price in 61.8–78.6 zone + Close bearish (close < open) + Upper wick > body
-- BUY:  Price in 61.8–78.6 zone + Close bullish + Lower wick >= 1.5x body
-- OR: Engulfing pattern (prev candle engulfed by current)
+- Zone check: uses CLOSED M5 candle (not live price) — prevents false blocks
+- SELL: closedM5.high >= zone_lo + bearish close + upper wick >= 1.5x body + body in lower half
+- BUY:  closedM5.low <= zone_hi + bullish close + lower wick >= 1.5x body + body in upper half
+- OR: Engulfing pattern (prev candle engulfed by current, both already closed)
+- Tolerance: zone-reach check (not strict 78.6% exact touch — removed overly strict 0.1% tolerance)
 ### 6. Stop Loss: Swing Low (Buy) or Swing High (Sell)
 ### 7. Take Profit: -27% Fibonacci extension
 ### 8. Position Sizing: Lot = (1% × Balance) / SL distance
-### 9. Filters: Min SL distance (0.1 × ATR14), max 1 active signal per zone-bucket
+### 9. Filters: Min SL distance (0.1 × ATR14), max 1 active signal per fractal anchor
+
+### Active Signal Tracking (activeSignal vs currentSignal)
+- `currentSignal`: fired when conditions met — becomes null after single-position rule marks anchor
+- `activeSignal`: persists the last fired signal until TP or SL is hit
+- TP/SL tracking runs against `activeSignal` (not `currentSignal`) — ensures tracking always works
+- Dashboard shows `activeSignal` panel (persists until trade is closed by TP/SL)
+
+### Backend Test Signal
+- `POST /api/test-signal`: injects test signal with current market data, sends push to all registered devices
 
 ## Signal Output Fields
 - Pair, Timeframe, Trend, Entry Price, Stop Loss, Take Profit

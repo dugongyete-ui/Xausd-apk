@@ -164,143 +164,121 @@ function calcATR(candles: Candle[], period: number): number {
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
-// STRICT 5-bar fractal swing validation — 3 aturan kritis:
+// Swing detection — responsif terhadap pergerakan market terbaru.
 //
-// ① Hanya candle CLOSED:
-//    Loop mulai dari n-4, bukan n-3.
-//    slice[n-1] adalah candle live — tidak pernah dipakai sebagai right neighbor.
-//    Dengan begitu slice[i+1] dan slice[i+2] dijamin sudah closed.
-//    Ini mencegah fractal repaint / Fibonacci berubah-ubah.
+// ANCHOR (titik utama Fibonacci):
+//   Bearish → Fractal HIGH terbaru (5-bar: high[i] > 4 neighbors, EMA50 < EMA200)
+//   Bullish → Fractal LOW terbaru (5-bar: low[i] < 4 neighbors, EMA50 > EMA200)
+//   Anchor hanya boleh candle yang SUDAH CLOSED (loop dari n-4).
+//   Ini mencegah repaint: anchor tidak berubah-ubah selama candle masih live.
 //
-// ② Fractal hanya valid jika SEARAH trend saat itu:
-//    EMA50 vs EMA200 dicek PADA INDEX candle fractal (bukan nilai EMA terkini).
-//    Bearish fractal high: EMA50 < EMA200 di candle tersebut.
-//    Bullish fractal low : EMA50 > EMA200 di candle tersebut.
+// PAIR EXTREME (ujung range Fibonacci):
+//   Bearish → SwingLow  = LOW TERKECIL dalam 80 candle SEBELUM anchor
+//   Bullish → SwingHigh = HIGH TERBESAR dalam 80 candle SEBELUM anchor
+//   Tidak perlu fractal — cukup extreme price aktual.
+//   Ini membuat Fibonacci responsif: ketika market cetak low baru,
+//   SwingLow langsung update dan zona Fib bergeser.
 //
-// ③ Pasangan pivot harus KEDUANYA fractal (simetris):
-//    Bearish: Fractal HIGH → Fractal LOW SEBELUM high (bukan absolute lowest low).
-//    Bullish: Fractal LOW  → Fractal HIGH SEBELUM low (bukan absolute highest high).
+// Update trigger:
+//   Fibonacci update ketika: anchorEpoch berubah (fractal baru)
+//   ATAU pairValue berubah (new extreme terbaru untuk fractal yang sama).
 //
-// anchorEpoch = epoch candle fractal → kunci stabilitas Fibonacci.
+// anchorEpoch = epoch candle fractal → kunci stabilitas anchor.
 function findSwings(
   candles: Candle[],
   trend: "Bullish" | "Bearish"
 ): { swingHigh: number; swingLow: number; anchorEpoch: number } | null {
   const LOOKBACK = Math.min(candles.length, 100);
+  const PAIR_LOOKBACK = 80; // max candles before anchor to search for pair extreme
   const slice = candles.slice(-LOOKBACK);
   const n = slice.length;
   if (n < 10) return null;
 
-  // Hitung EMA full-length untuk cek alignment trend per-index
   const closes = candles.map((c) => c.close);
   const ema50Full = calcEMAFull(closes, EMA50_PERIOD);
   const ema200Full = calcEMAFull(closes, EMA200_PERIOD);
-  const offset = candles.length - LOOKBACK; // slice[i] === candles[offset + i]
+  const offset = candles.length - LOOKBACK;
 
   if (trend === "Bearish") {
-    // ① Loop dari n-4: right neighbors sudah closed, live candle tidak disentuh
+    // Cari Fractal HIGH terbaru (anchor): loop dari n-4 ke belakang
+    // n-4 karena butuh 2 right neighbors yang sudah closed (n-3, n-2)
+    // slice[n-1] adalah live candle, tidak disentuh
     for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingHigh =
-        c.high > slice[i - 1].high &&
-        c.high > slice[i - 2].high &&
-        c.high > slice[i + 1].high &&
-        c.high > slice[i + 2].high;
+        c.high > slice[i - 1].high && c.high > slice[i - 2].high &&
+        c.high > slice[i + 1].high && c.high > slice[i + 2].high;
       if (!isSwingHigh) continue;
 
-      // ② Cek trend alignment di index fractal: EMA50 < EMA200 (bearish)
+      // EMA alignment: EMA50 < EMA200 di candle fractal
       const absI = offset + i;
       const e50 = ema50Full[absI];
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 >= e200) continue;
 
-      // ③ Cari fractal LOW TERDEKAT sebelum fractal HIGH ini
-      //    Chronological rule: Low(lama) → High(baru) harus single-leg bersih.
-      //    Setelah menemukan fractal LOW di j, verifikasi tidak ada
-      //    fractal HIGH lain di antara j dan i (tumpang tindih).
-      let pairLowIdx: number | null = null;
-      let pairLow: number | null = null;
-      for (let j = i - 2; j >= 4; j--) {
-        const p = slice[j];
-        const isFractalLow =
-          p.low < slice[j - 1].low && p.low < slice[j - 2].low &&
-          p.low < slice[j + 1].low && p.low < slice[j + 2].low;
-        if (isFractalLow) {
-          pairLowIdx = j;
-          pairLow = p.low;
+      // SwingLow = local trough terbaru sebelum anchor (asal impulse naik ke fractal high ini).
+      // Cari 3-bar local low (low < tetangga kiri & kanan) dari dekat anchor ke belakang.
+      // Kalau tidak ada local low dalam PAIR_LOOKBACK, fallback ke minimum 20 candle terakhir.
+      const searchStart = Math.max(1, i - PAIR_LOOKBACK);
+      let swingLow: number | null = null;
+      for (let j = i - 1; j >= searchStart; j--) {
+        const prevLow = j > 0 ? slice[j - 1].low : slice[j].low;
+        const nextLow = slice[j + 1].low;
+        if (slice[j].low <= prevLow && slice[j].low <= nextLow) {
+          swingLow = slice[j].low;
           break;
         }
       }
-      if (pairLowIdx === null || pairLow === null) continue;
-
-      // Validasi chronological: tidak boleh ada fractal HIGH di antara j dan i
-      let hasIntermediateHigh = false;
-      for (let k = pairLowIdx + 2; k <= i - 2; k++) {
-        if (k < 2 || k + 2 >= n) continue;
-        if (
-          slice[k].high > slice[k - 1].high && slice[k].high > slice[k - 2].high &&
-          slice[k].high > slice[k + 1].high && slice[k].high > slice[k + 2].high
-        ) {
-          hasIntermediateHigh = true;
-          break;
-        }
+      if (swingLow === null) {
+        // Fallback: minimum dalam 20 candle sebelum anchor
+        const fb = Math.max(0, i - 20);
+        let mn = Infinity;
+        for (let j = fb; j < i; j++) if (slice[j].low < mn) mn = slice[j].low;
+        if (mn !== Infinity) swingLow = mn;
       }
-      if (hasIntermediateHigh) continue;
+      if (swingLow === null) continue;
+      if (c.high - swingLow < 5) continue;
 
-      if (c.high - pairLow < 5) continue;
-      return { swingHigh: c.high, swingLow: pairLow, anchorEpoch: c.epoch };
+      return { swingHigh: c.high, swingLow, anchorEpoch: c.epoch };
     }
   } else {
-    // ① Loop dari n-4: right neighbors sudah closed
+    // Cari Fractal LOW terbaru (anchor)
     for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingLow =
-        c.low < slice[i - 1].low &&
-        c.low < slice[i - 2].low &&
-        c.low < slice[i + 1].low &&
-        c.low < slice[i + 2].low;
+        c.low < slice[i - 1].low && c.low < slice[i - 2].low &&
+        c.low < slice[i + 1].low && c.low < slice[i + 2].low;
       if (!isSwingLow) continue;
 
-      // ② Cek trend alignment di index fractal: EMA50 > EMA200 (bullish)
+      // EMA alignment: EMA50 > EMA200 di candle fractal
       const absI = offset + i;
       const e50 = ema50Full[absI];
       const e200 = ema200Full[absI];
       if (isNaN(e50) || isNaN(e200) || e50 <= e200) continue;
 
-      // ③ Cari fractal HIGH TERDEKAT sebelum fractal LOW ini
-      //    Chronological rule: High(lama) → Low(baru) harus single-leg bersih.
-      //    Verifikasi tidak ada fractal LOW lain di antara j dan i.
-      let pairHighIdx: number | null = null;
-      let pairHigh: number | null = null;
-      for (let j = i - 2; j >= 4; j--) {
-        const p = slice[j];
-        const isFractalHigh =
-          p.high > slice[j - 1].high && p.high > slice[j - 2].high &&
-          p.high > slice[j + 1].high && p.high > slice[j + 2].high;
-        if (isFractalHigh) {
-          pairHighIdx = j;
-          pairHigh = p.high;
+      // SwingHigh = local peak terbaru sebelum anchor (asal impulse turun ke fractal low ini).
+      // Cari 3-bar local high (high > tetangga kiri & kanan) dari dekat anchor ke belakang.
+      // Fallback ke maximum 20 candle terakhir jika tidak ada local peak.
+      const searchStart = Math.max(1, i - PAIR_LOOKBACK);
+      let swingHigh: number | null = null;
+      for (let j = i - 1; j >= searchStart; j--) {
+        const prevHigh = j > 0 ? slice[j - 1].high : slice[j].high;
+        const nextHigh = slice[j + 1].high;
+        if (slice[j].high >= prevHigh && slice[j].high >= nextHigh) {
+          swingHigh = slice[j].high;
           break;
         }
       }
-      if (pairHighIdx === null || pairHigh === null) continue;
-
-      // Validasi chronological: tidak boleh ada fractal LOW di antara j dan i
-      let hasIntermediateLow = false;
-      for (let k = pairHighIdx + 2; k <= i - 2; k++) {
-        if (k < 2 || k + 2 >= n) continue;
-        if (
-          slice[k].low < slice[k - 1].low && slice[k].low < slice[k - 2].low &&
-          slice[k].low < slice[k + 1].low && slice[k].low < slice[k + 2].low
-        ) {
-          hasIntermediateLow = true;
-          break;
-        }
+      if (swingHigh === null) {
+        const fb = Math.max(0, i - 20);
+        let mx = -Infinity;
+        for (let j = fb; j < i; j++) if (slice[j].high > mx) mx = slice[j].high;
+        if (mx !== -Infinity) swingHigh = mx;
       }
-      if (hasIntermediateLow) continue;
+      if (swingHigh === null) continue;
+      if (swingHigh - c.low < 5) continue;
 
-      if (pairHigh - c.low < 5) continue;
-      return { swingHigh: pairHigh, swingLow: c.low, anchorEpoch: c.epoch };
+      return { swingHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
   }
   return null;
@@ -324,19 +302,20 @@ function calcFib(swingHigh: number, swingLow: number, trend: "Bullish" | "Bearis
   };
 }
 
-// Rejection Pin Bar — strict 5-condition filter (mirrors TradingContext):
-// ① Candle arah sesuai trend
+// Rejection Pin Bar — 4-condition filter:
+// ① Candle arah sesuai trend (close vs open)
 // ② Wick dominan ≥ 1.5× body
 // ③ Body di sisi yang benar dari midpoint candle
-// ④ Ujung wick menyentuh level 78.6% (toleransi 0.1%)
+// ④ Wick menyentuh/masuk zona Fibonacci (lo–hi), bukan exact 78.6%
 // Hanya candle CLOSED yang dievaluasi (dijamin dari caller)
 const M5_ATR_MIN = 1.0;
 
-function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: number): boolean {
+function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", fib: FibLevels): boolean {
   const body = Math.abs(candle.close - candle.open);
   if (body === 0) return false;
   const midpoint = (candle.high + candle.low) / 2;
-  const tolerance = level786 * 0.001;
+  const lo = Math.min(fib.level618, fib.level786);
+  const hi = Math.max(fib.level618, fib.level786);
 
   if (trend === "Bullish") {
     if (candle.close <= candle.open) return false;
@@ -344,7 +323,8 @@ function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: 
     if (lowerWick < body * 1.5) return false;
     const bodyCenter = (candle.open + candle.close) / 2;
     if (bodyCenter <= midpoint) return false;
-    if (Math.abs(candle.low - level786) > tolerance) return false;
+    // Lower wick harus mencapai zona (candle low <= hi)
+    if (candle.low > hi) return false;
     return true;
   }
   if (candle.close >= candle.open) return false;
@@ -352,7 +332,8 @@ function checkRejection(candle: Candle, trend: "Bullish" | "Bearish", level786: 
   if (upperWick < body * 1.5) return false;
   const bodyCenter = (candle.open + candle.close) / 2;
   if (bodyCenter >= midpoint) return false;
-  if (Math.abs(candle.high - level786) > tolerance) return false;
+  // Upper wick harus mencapai zona (candle high >= lo)
+  if (candle.high < lo) return false;
   return true;
 }
 
@@ -416,8 +397,10 @@ class DerivService {
 
   private connectionStatus: "connecting" | "connected" | "disconnected" = "disconnected";
 
-  // anchorEpoch = fractal candle epoch. TRUE stability key (not price values).
-  private lastSwing: { anchorEpoch: number; trend: string } | null = null;
+  // anchorEpoch = fractal candle epoch. pairValue = swingLow (bearish) or swingHigh (bullish).
+  // Fibonacci updates when EITHER anchorEpoch changes (new fractal) OR pairValue changes
+  // (market made new extreme with same fractal anchor → zone shifts responsively).
+  private lastSwing: { anchorEpoch: number; trend: string; pairValue: number } | null = null;
   private fibLevels: FibLevels | null = null;
   private currentSignal: TradingSignal | null = null;
   // Single position rule: satu signal per fractal anchor
@@ -623,11 +606,19 @@ class DerivService {
     const swings = findSwings(this.m15Candles, trend);
     if (swings) {
       const last = this.lastSwing;
-      if (!last || last.trend !== trend || last.anchorEpoch !== swings.anchorEpoch) {
-        this.lastSwing = { anchorEpoch: swings.anchorEpoch, trend };
+      const pairValue = trend === "Bearish" ? swings.swingLow : swings.swingHigh;
+      const anchorChanged = !last || last.trend !== trend || last.anchorEpoch !== swings.anchorEpoch;
+      const pairChanged  = last && last.anchorEpoch === swings.anchorEpoch && last.pairValue !== pairValue;
+
+      if (anchorChanged || pairChanged) {
+        this.lastSwing = { anchorEpoch: swings.anchorEpoch, trend, pairValue };
         this.fibLevels = calcFib(swings.swingHigh, swings.swingLow, trend as "Bullish" | "Bearish");
+        // Reset signal lock jika anchor baru (bukan sekedar pair update)
+        if (anchorChanged) {
+          this.lastSignaledAnchorEpoch = null;
+        }
         const anchorDate = new Date(swings.anchorEpoch * 1000).toISOString();
-        console.log(`[DerivService] New fractal anchor! Epoch: ${anchorDate}, High: ${swings.swingHigh}, Low: ${swings.swingLow}, Trend: ${trend}`);
+        console.log(`[DerivService] Fib updated — Anchor: ${anchorDate}, High: ${swings.swingHigh}, Low: ${swings.swingLow}, Trend: ${trend}${pairChanged ? " [pair moved]" : ""}`);
       }
     } else {
       this.lastSwing = null;
@@ -661,14 +652,20 @@ class DerivService {
     const lo = Math.min(fib.level618, fib.level786);
     const hi = Math.max(fib.level618, fib.level786);
 
-    if (this.currentPrice < lo || this.currentPrice > hi) {
-      this.currentSignal = null;
-      return;
-    }
-
     // ① Gunakan candle CLOSED: n-2 (closed terakhir), n-3 (sebelumnya)
     const closedM5 = this.m5Candles[this.m5Candles.length - 2];
     const prevM5   = this.m5Candles[this.m5Candles.length - 3];
+
+    // ② Zone check: pakai candle CLOSED (bukan harga live)
+    // Bearish SELL: wick atas closedM5 harus masuk ke zona
+    // Bullish BUY : wick bawah closedM5 harus masuk ke zona
+    const candleTouchesZone = trend === "Bearish"
+      ? closedM5.high >= lo
+      : closedM5.low <= hi;
+    if (!candleTouchesZone) {
+      this.currentSignal = null;
+      return;
+    }
 
     // ④ Volatility filter: ATR M5 harus cukup besar
     const m5ATR = calcATR(this.m5Candles.slice(0, -1), ATR_PERIOD);
@@ -677,8 +674,8 @@ class DerivService {
       return;
     }
 
-    // ② & ③ Rejection (strict: wick ≥ 1.5×, body sisi benar, sentuh 78.6%)
-    const isRejection = checkRejection(closedM5, trend, fib.level786);
+    // ③ Rejection pin bar atau Engulfing pattern
+    const isRejection = checkRejection(closedM5, trend, fib);
     const isEngulfing = checkEngulfing(prevM5, closedM5, trend);
     if (!isRejection && !isEngulfing) {
       this.currentSignal = null;
@@ -794,6 +791,68 @@ class DerivService {
 
   getSignalHistory(): TradingSignal[] {
     return this.signalHistory;
+  }
+
+  // ─── Test helper: inject signal manually ──────────────────────────────────
+  injectTestSignal(params: {
+    price: number;
+    trend: "Bullish" | "Bearish";
+    sl: number;
+    tp: number;
+    rr: number;
+  }): void {
+    const nowMs = Date.now();
+    const bucket = Math.floor(nowMs / (5 * 60 * 1000));
+    const zone = Math.round(params.price * 2) / 2;
+    const sigId = `test_${zone}_${params.trend}_${bucket}`;
+
+    const signal: TradingSignal = {
+      id: sigId,
+      pair: "XAUUSD",
+      trend: params.trend,
+      entryPrice: params.price,
+      stopLoss: params.sl,
+      takeProfit: params.tp,
+      riskReward: params.rr,
+      timestampUTC: new Date(nowMs).toUTCString(),
+      fibLevels: this.fibLevels ?? {
+        swingHigh: params.price + 30,
+        swingLow: params.price - 30,
+        level618: params.price + 18,
+        level786: params.price + 23,
+        extensionNeg27: params.price - 8,
+      },
+      confirmationType: "rejection",
+    };
+
+    this.currentSignal = signal;
+    if (!this.savedSignalKeys.has(sigId)) {
+      this.savedSignalKeys.add(sigId);
+      this.signalHistory.unshift(signal);
+      if (this.signalHistory.length > 100) this.signalHistory.pop();
+      console.log(`[DerivService] TEST SIGNAL injected: ${params.trend} @ ${params.price}`);
+    }
+
+    const isBull = params.trend === "Bullish";
+    const dirEmoji = isBull ? "🟢" : "🔴";
+    const dirLabel = isBull ? "BUY ▲" : "SELL ▼";
+    const pushTitle = `${dirEmoji} [TEST] LIBARTIN — SINYAL ${dirLabel} XAUUSD`;
+    const pushBody =
+      `📍 Entry: ${params.price.toFixed(2)}\n` +
+      `🛑 SL: ${params.sl.toFixed(2)}  |  🎯 TP: ${params.tp.toFixed(2)}\n` +
+      `📊 R:R 1:${params.rr}  |  TEST Signal`;
+
+    const tokens = Array.from(this.pushTokens);
+    console.log(`[DerivService] Sending test push to ${tokens.length} device(s)...`);
+    if (tokens.length > 0) {
+      sendExpoPushNotifications(tokens, pushTitle, pushBody, {
+        type: "test-signal",
+        trend: params.trend,
+        signalId: sigId,
+      }).catch((e) => console.error("[PushNotif] Test error:", e));
+    } else {
+      console.warn("[DerivService] No push tokens registered — open app first to register");
+    }
   }
 }
 

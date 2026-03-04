@@ -435,9 +435,9 @@ function FibLevelsCard() {
 }
 
 function SignalCard() {
-  const { currentSignal, inZone, trend, m15Candles } = useTrading();
+  const { activeSignal, inZone, trend, m15Candles } = useTrading();
 
-  if (!currentSignal) {
+  if (!activeSignal) {
     const loadMsg =
       trend === "Loading"
         ? `Memuat M15: ${m15Candles.length}/300 candle (EMA siap setelah 200)...`
@@ -461,7 +461,7 @@ function SignalCard() {
     );
   }
 
-  const isBull = currentSignal.trend === "Bullish";
+  const isBull = activeSignal.trend === "Bullish";
   const trendColor = isBull ? C.green : C.red;
 
   return (
@@ -483,7 +483,7 @@ function SignalCard() {
             color={trendColor}
           />
           <Text style={[styles.signalBadgeText, { color: trendColor }]}>
-            {currentSignal.trend.toUpperCase()}
+            {activeSignal.trend.toUpperCase()}
           </Text>
         </View>
       </View>
@@ -492,12 +492,12 @@ function SignalCard() {
         <View style={styles.confirmRow}>
           <View style={[styles.confirmBadge, { backgroundColor: trendColor + "18" }]}>
             <Ionicons
-              name={currentSignal.confirmationType === "engulfing" ? "layers" : "radio-button-on"}
+              name={activeSignal.confirmationType === "engulfing" ? "layers" : "radio-button-on"}
               size={11}
               color={trendColor}
             />
             <Text style={[styles.confirmText, { color: trendColor }]}>
-              {currentSignal.confirmationType === "engulfing" ? "ENGULFING M5" : "REJECTION M5"}
+              {activeSignal.confirmationType === "engulfing" ? "ENGULFING M5" : "REJECTION M5"}
             </Text>
           </View>
           <Text style={styles.confirmSub}>Zona M15 · Konfirmasi M5</Text>
@@ -506,12 +506,12 @@ function SignalCard() {
           <View>
             <Text style={styles.signalPriceLabel}>ENTRY</Text>
             <Text style={[styles.signalPriceValue, { color: trendColor }]}>
-              {currentSignal.entryPrice.toFixed(2)}
+              {activeSignal.entryPrice.toFixed(2)}
             </Text>
           </View>
           <View style={styles.rrBlock}>
             <Text style={styles.rrLabel}>R:R</Text>
-            <Text style={styles.rrValue}>1:{currentSignal.riskReward}</Text>
+            <Text style={styles.rrValue}>1:{activeSignal.riskReward}</Text>
           </View>
         </View>
         <View style={styles.signalDivider} />
@@ -520,25 +520,25 @@ function SignalCard() {
             <View style={[styles.levelDot, { backgroundColor: C.red }]} />
             <Text style={styles.levelKey}>SL</Text>
             <Text style={[styles.levelVal, { color: C.red }]}>
-              {currentSignal.stopLoss.toFixed(2)}
+              {activeSignal.stopLoss.toFixed(2)}
             </Text>
           </View>
           <View style={styles.signalLevel}>
             <View style={[styles.levelDot, { backgroundColor: C.green }]} />
             <Text style={styles.levelKey}>TP</Text>
             <Text style={[styles.levelVal, { color: C.green }]}>
-              {currentSignal.takeProfit.toFixed(2)}
+              {activeSignal.takeProfit.toFixed(2)}
             </Text>
           </View>
           <View style={styles.signalLevel}>
             <View style={[styles.levelDot, { backgroundColor: C.blue }]} />
             <Text style={styles.levelKey}>LOT</Text>
             <Text style={[styles.levelVal, { color: C.blue }]}>
-              {currentSignal.lotSize.toFixed(2)}
+              {activeSignal.lotSize.toFixed(2)}
             </Text>
           </View>
         </View>
-        <Text style={styles.signalTime}>{currentSignal.timestampUTC}</Text>
+        <Text style={styles.signalTime}>{activeSignal.timestampUTC}</Text>
       </View>
     </View>
   );

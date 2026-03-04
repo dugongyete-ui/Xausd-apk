@@ -56,9 +56,23 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 84 : insets.bottom + 60;
-  const { balance, setBalance, atr, connectionStatus, candles, notificationEnabled, requestNotifications } = useTrading();
+  const { balance, setBalance, atr, connectionStatus, candles, notificationEnabled, requestNotifications, injectDemoSignal, clearDemoSignal, activeSignal, currentPrice } = useTrading();
   const [inputBalance, setInputBalance] = useState(String(balance));
   const [saved, setSaved] = useState(false);
+  const [demoSent, setDemoSent] = useState<"BUY" | "SELL" | null>(null);
+
+  const handleDemoSignal = (type: "BUY" | "SELL") => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    injectDemoSignal(type);
+    setDemoSent(type);
+    setTimeout(() => setDemoSent(null), 3000);
+  };
+
+  const handleClearDemo = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    clearDemoSignal();
+    setDemoSent(null);
+  };
 
   const handleSave = () => {
     const val = parseFloat(inputBalance.replace(/,/g, ""));
@@ -117,6 +131,62 @@ export default function SettingsScreen() {
               />
               <Text style={styles.saveBtnText}>{saved ? "Saved!" : "Save Balance"}</Text>
             </Pressable>
+          </View>
+        </View>
+
+        {/* ─── Demo Signal Tester ─── */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>TEST SINYAL VISUAL</Text>
+          <View style={styles.card}>
+            <Text style={styles.demoDesc}>
+              Tekan tombol di bawah untuk melihat tampilan sinyal BUY atau SELL di dashboard dan halaman Signals. Ini hanya untuk preview — bukan sinyal trading nyata.
+            </Text>
+            {currentPrice !== null && (
+              <Text style={styles.demoPrice}>Harga Live: {currentPrice.toFixed(2)}</Text>
+            )}
+            <View style={styles.demoRow}>
+              <Pressable
+                onPress={() => handleDemoSignal("BUY")}
+                style={({ pressed }) => [
+                  styles.demoBtnBuy,
+                  { opacity: pressed ? 0.75 : 1 },
+                  demoSent === "BUY" && styles.demoBtnActive,
+                ]}
+              >
+                <Ionicons name="trending-up" size={18} color="#fff" />
+                <Text style={styles.demoBtnText}>
+                  {demoSent === "BUY" ? "Sinyal BUY Aktif!" : "Test BUY"}
+                </Text>
+              </Pressable>
+              <Pressable
+                onPress={() => handleDemoSignal("SELL")}
+                style={({ pressed }) => [
+                  styles.demoBtnSell,
+                  { opacity: pressed ? 0.75 : 1 },
+                  demoSent === "SELL" && styles.demoBtnActive,
+                ]}
+              >
+                <Ionicons name="trending-down" size={18} color="#fff" />
+                <Text style={styles.demoBtnText}>
+                  {demoSent === "SELL" ? "Sinyal SELL Aktif!" : "Test SELL"}
+                </Text>
+              </Pressable>
+            </View>
+            {activeSignal && activeSignal.id.startsWith("demo-") && (
+              <Pressable
+                onPress={handleClearDemo}
+                style={({ pressed }) => [styles.demoClearBtn, { opacity: pressed ? 0.75 : 1 }]}
+              >
+                <Ionicons name="close-circle-outline" size={16} color={C.textSub} />
+                <Text style={styles.demoClearText}>Hapus Demo Signal</Text>
+              </Pressable>
+            )}
+            <View style={styles.demoNote}>
+              <Ionicons name="information-circle-outline" size={14} color={C.textDim} />
+              <Text style={styles.demoNoteText}>
+                Buka tab Dashboard untuk melihat Signal Card dan tab Signals untuk history.
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -487,6 +557,86 @@ const styles = StyleSheet.create({
     fontSize: 11,
     color: C.textDim,
     lineHeight: 17,
+    flex: 1,
+  },
+  demoDesc: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: C.textSub,
+    lineHeight: 18,
+    padding: 14,
+    paddingBottom: 6,
+  },
+  demoPrice: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 12,
+    color: C.gold,
+    paddingHorizontal: 14,
+    paddingBottom: 10,
+  },
+  demoRow: {
+    flexDirection: "row",
+    gap: 10,
+    paddingHorizontal: 14,
+    paddingBottom: 12,
+  },
+  demoBtnBuy: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: C.green,
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
+  demoBtnSell: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 8,
+    backgroundColor: C.red,
+    borderRadius: 12,
+    paddingVertical: 14,
+  },
+  demoBtnActive: {
+    opacity: 0.7,
+  },
+  demoBtnText: {
+    fontFamily: "Inter_700Bold",
+    fontSize: 13,
+    color: "#fff",
+  },
+  demoClearBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
+    marginHorizontal: 14,
+    marginBottom: 10,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: C.border,
+    borderRadius: 10,
+  },
+  demoClearText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 12,
+    color: C.textSub,
+  },
+  demoNote: {
+    flexDirection: "row",
+    gap: 6,
+    padding: 14,
+    paddingTop: 2,
+    alignItems: "flex-start",
+  },
+  demoNoteText: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 11,
+    color: C.textDim,
+    lineHeight: 16,
     flex: 1,
   },
 });
