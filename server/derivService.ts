@@ -139,6 +139,19 @@ function calcEMA(closes: number[], period: number): number[] {
   return result;
 }
 
+function calcEMAFull(closes: number[], period: number): number[] {
+  if (closes.length < period) return new Array(closes.length).fill(NaN);
+  const k = 2 / (period + 1);
+  const result: number[] = new Array(period - 1).fill(NaN);
+  let ema = closes.slice(0, period).reduce((a, b) => a + b, 0) / period;
+  result.push(ema);
+  for (let i = period; i < closes.length; i++) {
+    ema = closes[i] * k + ema * (1 - k);
+    result.push(ema);
+  }
+  return result;
+}
+
 function calcATR(candles: Candle[], period: number): number {
   if (candles.length < period + 1) return 0;
   const trs: number[] = [];
@@ -151,15 +164,24 @@ function calcATR(candles: Candle[], period: number): number {
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
-// STRICT 5-bar fractal swing validation:
-// Swing High valid: High[i] > High[i-1] & High[i-2] AND High[i] > High[i+1] & High[i+2]
-// Swing Low valid:  Low[i]  < Low[i-1]  & Low[i-2]  AND Low[i]  < Low[i+1]  & Low[i+2]
-// Trend Alignment:
-//   Bearish → pull from Latest Swing High → Latest Swing Low
-//   Bullish → pull from Latest Swing Low  → Latest Swing High
-// anchorEpoch is the epoch of the fractal candle itself — the TRUE stability key.
-// Fibonacci only recalculates when anchorEpoch changes (new fractal pivot on M15).
-// Bug fix: previously compared swingLow/swingHigh prices which drift every candle.
+// STRICT 5-bar fractal swing validation — 3 aturan kritis:
+//
+// ① Hanya candle CLOSED:
+//    Loop mulai dari n-4, bukan n-3.
+//    slice[n-1] adalah candle live — tidak pernah dipakai sebagai right neighbor.
+//    Dengan begitu slice[i+1] dan slice[i+2] dijamin sudah closed.
+//    Ini mencegah fractal repaint / Fibonacci berubah-ubah.
+//
+// ② Fractal hanya valid jika SEARAH trend saat itu:
+//    EMA50 vs EMA200 dicek PADA INDEX candle fractal (bukan nilai EMA terkini).
+//    Bearish fractal high: EMA50 < EMA200 di candle tersebut.
+//    Bullish fractal low : EMA50 > EMA200 di candle tersebut.
+//
+// ③ Pasangan pivot harus KEDUANYA fractal (simetris):
+//    Bearish: Fractal HIGH → Fractal LOW SEBELUM high (bukan absolute lowest low).
+//    Bullish: Fractal LOW  → Fractal HIGH SEBELUM low (bukan absolute highest high).
+//
+// anchorEpoch = epoch candle fractal → kunci stabilitas Fibonacci.
 function findSwings(
   candles: Candle[],
   trend: "Bullish" | "Bearish"
@@ -169,9 +191,15 @@ function findSwings(
   const n = slice.length;
   if (n < 10) return null;
 
+  // Hitung EMA full-length untuk cek alignment trend per-index
+  const closes = candles.map((c) => c.close);
+  const ema50Full = calcEMAFull(closes, EMA50_PERIOD);
+  const ema200Full = calcEMAFull(closes, EMA200_PERIOD);
+  const offset = candles.length - LOOKBACK; // slice[i] === candles[offset + i]
+
   if (trend === "Bearish") {
-    // Find most recent 5-bar fractal HIGH → then lowest absolute low AFTER it
-    for (let i = n - 3; i >= 4; i--) {
+    // ① Loop dari n-4: right neighbors n-3 dan n-2 sudah closed, n-1 live tidak disentuh
+    for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingHigh =
         c.high > slice[i - 1].high &&
@@ -180,17 +208,31 @@ function findSwings(
         c.high > slice[i + 2].high;
       if (!isSwingHigh) continue;
 
-      let lowestLow = Infinity;
-      for (let j = i + 1; j < n; j++) {
-        if (slice[j].low < lowestLow) lowestLow = slice[j].low;
+      // ② Cek trend alignment di index fractal: EMA50 < EMA200 (bearish)
+      const absI = offset + i;
+      const e50 = ema50Full[absI];
+      const e200 = ema200Full[absI];
+      if (isNaN(e50) || isNaN(e200) || e50 >= e200) continue;
+
+      // ③ Cari fractal LOW SEBELUM fractal high ini (pair simetris)
+      let pairLow: number | null = null;
+      for (let j = i - 2; j >= 4; j--) {
+        const p = slice[j];
+        const isFractalLow =
+          p.low < slice[j - 1].low && p.low < slice[j - 2].low &&
+          p.low < slice[j + 1].low && p.low < slice[j + 2].low;
+        if (isFractalLow) {
+          pairLow = p.low;
+          break;
+        }
       }
-      if (lowestLow === Infinity || lowestLow >= c.high) continue;
-      if (c.high - lowestLow < 5) continue;
-      return { swingHigh: c.high, swingLow: lowestLow, anchorEpoch: c.epoch };
+      if (pairLow === null) continue;
+      if (c.high - pairLow < 5) continue;
+      return { swingHigh: c.high, swingLow: pairLow, anchorEpoch: c.epoch };
     }
   } else {
-    // Bullish: find most recent 5-bar fractal LOW → then highest absolute high AFTER it
-    for (let i = n - 3; i >= 4; i--) {
+    // ① Loop dari n-4: right neighbors sudah closed
+    for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingLow =
         c.low < slice[i - 1].low &&
@@ -199,13 +241,27 @@ function findSwings(
         c.low < slice[i + 2].low;
       if (!isSwingLow) continue;
 
-      let highestHigh = -Infinity;
-      for (let j = i + 1; j < n; j++) {
-        if (slice[j].high > highestHigh) highestHigh = slice[j].high;
+      // ② Cek trend alignment di index fractal: EMA50 > EMA200 (bullish)
+      const absI = offset + i;
+      const e50 = ema50Full[absI];
+      const e200 = ema200Full[absI];
+      if (isNaN(e50) || isNaN(e200) || e50 <= e200) continue;
+
+      // ③ Cari fractal HIGH SEBELUM fractal low ini (pair simetris)
+      let pairHigh: number | null = null;
+      for (let j = i - 2; j >= 4; j--) {
+        const p = slice[j];
+        const isFractalHigh =
+          p.high > slice[j - 1].high && p.high > slice[j - 2].high &&
+          p.high > slice[j + 1].high && p.high > slice[j + 2].high;
+        if (isFractalHigh) {
+          pairHigh = p.high;
+          break;
+        }
       }
-      if (highestHigh === -Infinity || highestHigh <= c.low) continue;
-      if (highestHigh - c.low < 5) continue;
-      return { swingHigh: highestHigh, swingLow: c.low, anchorEpoch: c.epoch };
+      if (pairHigh === null) continue;
+      if (pairHigh - c.low < 5) continue;
+      return { swingHigh: pairHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
   }
   return null;

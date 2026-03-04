@@ -202,16 +202,26 @@ function calcATR(candles: Candle[], period: number): number {
 }
 
 // ─── Swing Detection ──────────────────────────────────────────────────────────
-// Returns anchorEpoch = epoch of the fractal candle itself.
-// This is the stability key — Fibonacci only changes when anchorEpoch changes.
+// 3 aturan kritis yang dijaga:
 //
-// Bug fix: previously compared swingLow (absolute low that shifts every candle)
-// which caused Fibonacci to drift even when the fractal HIGH was unchanged.
-// Now we track anchorEpoch (the candle that IS the fractal) so zones are truly
-// locked until a genuinely new fractal pivot forms.
+// ① Hanya candle CLOSED:
+//    Loop mulai dari n-4, bukan n-3.
+//    Dengan begitu slice[i+1] dan slice[i+2] sudah closed.
+//    slice[n-1] adalah candle live yang sedang berjalan — tidak pernah dipakai
+//    sebagai right neighbor fractal sehingga fractal tidak bisa repaint.
 //
-// BEARISH: most recent 5-bar fractal HIGH → lowest absolute low after it
-// BULLISH: most recent 5-bar fractal LOW  → highest absolute high after it
+// ② Fractal hanya valid jika SEARAH trend:
+//    EMA50 vs EMA200 dicek PADA SAAT candle fractal terbentuk (bukan saat ini).
+//    Bearish: EMA50 < EMA200 di candle fractal high.
+//    Bullish: EMA50 > EMA200 di candle fractal low.
+//    Fractal yang terjadi sebelum trend berubah otomatis dilewati.
+//
+// ③ Pasangan pivot juga harus fractal (simetris):
+//    Bearish: Fractal HIGH → Fractal LOW sebelum high (bukan absolute lowest low).
+//    Bullish: Fractal LOW  → Fractal HIGH sebelum low (bukan absolute highest high).
+//
+// anchorEpoch = epoch candle fractal anchor → kunci stabilitas Fibonacci.
+// Fibonacci hanya update ketika anchorEpoch berubah (fractal baru terbentuk).
 function findSwings(
   candles: Candle[],
   trend: "Bullish" | "Bearish"
@@ -221,45 +231,75 @@ function findSwings(
   const n = slice.length;
   if (n < 10) return null;
 
+  // Hitung EMA full-length untuk cek alignment trend di setiap index
+  const closes = candles.map((c) => c.close);
+  const ema50Full = calcEMAFull(closes, EMA50_PERIOD);
+  const ema200Full = calcEMAFull(closes, EMA200_PERIOD);
+  const offset = candles.length - LOOKBACK; // slice[i] === candles[offset + i]
+
   if (trend === "Bearish") {
-    // Scan backwards: find most recent 5-bar fractal HIGH
-    // Valid: High[i] > High[i-1] & High[i-2] AND High[i] > High[i+1] & High[i+2]
-    for (let i = n - 3; i >= 4; i--) {
+    // ① Loop mulai n-4: slice[i+1] dan slice[i+2] sudah closed, slice[n-1] live tidak disentuh
+    for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingHigh =
         c.high > slice[i - 1].high && c.high > slice[i - 2].high &&
         c.high > slice[i + 1].high && c.high > slice[i + 2].high;
       if (!isSwingHigh) continue;
 
-      // Take lowest absolute low AFTER the fractal (for initial range)
-      let lowestLow = Infinity;
-      for (let j = i + 1; j < n; j++) {
-        if (slice[j].low < lowestLow) lowestLow = slice[j].low;
-      }
-      if (lowestLow === Infinity || lowestLow >= c.high) continue;
-      if (c.high - lowestLow < 5) continue;
+      // ② Cek alignment trend di candle fractal: EMA50 < EMA200 (bearish)
+      const absI = offset + i;
+      const e50 = ema50Full[absI];
+      const e200 = ema200Full[absI];
+      if (isNaN(e50) || isNaN(e200) || e50 >= e200) continue;
 
-      return { swingHigh: c.high, swingLow: lowestLow, anchorEpoch: c.epoch };
+      // ③ Cari fractal LOW terakhir SEBELUM fractal high ini (pair simetris)
+      let pairLow: number | null = null;
+      for (let j = i - 2; j >= 4; j--) {
+        const p = slice[j];
+        const isFractalLow =
+          p.low < slice[j - 1].low && p.low < slice[j - 2].low &&
+          p.low < slice[j + 1].low && p.low < slice[j + 2].low;
+        if (isFractalLow) {
+          pairLow = p.low;
+          break;
+        }
+      }
+      if (pairLow === null) continue;
+      if (c.high - pairLow < 5) continue;
+
+      return { swingHigh: c.high, swingLow: pairLow, anchorEpoch: c.epoch };
     }
   } else {
-    // Scan backwards: find most recent 5-bar fractal LOW
-    // Valid: Low[i] < Low[i-1] & Low[i-2] AND Low[i] < Low[i+1] & Low[i+2]
-    for (let i = n - 3; i >= 4; i--) {
+    // ① Loop mulai n-4: slice[i+1] dan slice[i+2] sudah closed
+    for (let i = n - 4; i >= 4; i--) {
       const c = slice[i];
       const isSwingLow =
         c.low < slice[i - 1].low && c.low < slice[i - 2].low &&
         c.low < slice[i + 1].low && c.low < slice[i + 2].low;
       if (!isSwingLow) continue;
 
-      // Take highest absolute high AFTER the fractal (for initial range)
-      let highestHigh = -Infinity;
-      for (let j = i + 1; j < n; j++) {
-        if (slice[j].high > highestHigh) highestHigh = slice[j].high;
-      }
-      if (highestHigh === -Infinity || highestHigh <= c.low) continue;
-      if (highestHigh - c.low < 5) continue;
+      // ② Cek alignment trend di candle fractal: EMA50 > EMA200 (bullish)
+      const absI = offset + i;
+      const e50 = ema50Full[absI];
+      const e200 = ema200Full[absI];
+      if (isNaN(e50) || isNaN(e200) || e50 <= e200) continue;
 
-      return { swingHigh: highestHigh, swingLow: c.low, anchorEpoch: c.epoch };
+      // ③ Cari fractal HIGH terakhir SEBELUM fractal low ini (pair simetris)
+      let pairHigh: number | null = null;
+      for (let j = i - 2; j >= 4; j--) {
+        const p = slice[j];
+        const isFractalHigh =
+          p.high > slice[j - 1].high && p.high > slice[j - 2].high &&
+          p.high > slice[j + 1].high && p.high > slice[j + 2].high;
+        if (isFractalHigh) {
+          pairHigh = p.high;
+          break;
+        }
+      }
+      if (pairHigh === null) continue;
+      if (pairHigh - c.low < 5) continue;
+
+      return { swingHigh: pairHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
   }
   return null;
