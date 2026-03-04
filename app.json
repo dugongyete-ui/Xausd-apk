@@ -17,7 +17,10 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.libartin.app",
       "infoPlist": {
-        "UIBackgroundModes": ["fetch", "remote-notification"]
+        "UIBackgroundModes": [
+          "fetch",
+          "remote-notification"
+        ]
       }
     },
     "android": {
@@ -64,6 +67,15 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {
+        "origin": "https://replit.com/"
+      },
+      "eas": {
+        "projectId": "7b3c42cc-37b1-41a7-aaf3-6d6e05d70f45"
+      }
+    },
+    "owner": "dzeckyete"
   }
 }
