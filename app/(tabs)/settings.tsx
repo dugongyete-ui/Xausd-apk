@@ -254,10 +254,15 @@ export default function SettingsScreen() {
               </View>
               <View style={[styles.divider, { marginHorizontal: 0 }]} />
               <View style={styles.notifInfoBox}>
-                <Ionicons name="information-circle" size={14} color={C.textDim} />
+                <Ionicons name="information-circle" size={14} color={C.gold} />
                 <Text style={styles.notifInfoText}>
-                  Notifikasi muncul saat sinyal terdeteksi dan ketika TP atau SL tercapai — mirip seperti notifikasi WhatsApp.{"\n\n"}
-                  <Text style={{ color: C.gold, fontFamily: "Inter_600SemiBold" }}>Catatan penting:</Text> Notifikasi HANYA aktif selama aplikasi terbuka (foreground/background). Jika aplikasi benar-benar ditutup (force close/swipe), sinyal tidak akan terdeteksi karena app perlu koneksi WebSocket ke Deriv. Biarkan app berjalan di background untuk hasil optimal.
+                  <Text style={{ color: C.gold, fontFamily: "Inter_600SemiBold" }}>✅ Push Notification seperti WhatsApp aktif!</Text>{"\n\n"}
+                  Server LIBARTIN berjalan 24/7 dan terhubung langsung ke Deriv. Ketika sinyal BUY atau SELL terdeteksi, server langsung mengirim notifikasi ke HP kamu — meski aplikasi sedang ditutup sekalipun.{"\n\n"}
+                  <Text style={{ color: "#A78BFA", fontFamily: "Inter_600SemiBold" }}>Yang kamu terima:</Text>{"\n"}
+                  {"  "}🟢 Sinyal BUY — entry, SL, TP, R:R{"\n"}
+                  {"  "}🔴 Sinyal SELL — entry, SL, TP, R:R{"\n"}
+                  {"  "}✅ Take Profit tercapai{"\n"}
+                  {"  "}🛑 Stop Loss kena
                 </Text>
               </View>
             </View>

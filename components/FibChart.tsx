@@ -383,15 +383,26 @@ export function FibChart() {
           {/* ── Fibonacci Structure Lines ── */}
           {fibLevels && (() => {
             const trendUp = trend === "Bullish";
+            // Color system — consistent, trader-friendly:
+            //   Swing extreme (origin of move) → Purple
+            //   61.8% zone boundary            → Gold
+            //   78.6% zone boundary            → Orange
+            //   SL reference (swing opposite)  → Red
+            //   TP target (-27% extension)      → Green
+            const SWING_ORIGIN_COLOR = "#C084FC"; // Purple — start of the swing
+            const ZONE_618_COLOR     = "#F0B429"; // Gold — primary entry zone
+            const ZONE_786_COLOR     = "#F97316"; // Orange — deep retracement zone
+            const SL_REF_COLOR       = "#EF4444"; // Red — SL reference level
+            const TP_TARGET_COLOR    = "#22C55E"; // Green — take profit target
             return (
               <>
-                {/* 0.0% — Swing High (Bullish) or Swing Low (Bearish) */}
+                {/* Swing High (Bearish: origin of move / Bullish: opposite extreme) */}
                 <FibLine
                   label={trendUp
-                    ? "0.0% · Swing High (Resistance)"
-                    : "0.0% · Swing Low (Support)"}
-                  price={trendUp ? fibLevels.swingHigh : fibLevels.swingLow}
-                  color={trendUp ? C.green : C.red}
+                    ? "Swing High · Origin"
+                    : "Swing High · Origin (SL Ref)"}
+                  price={fibLevels.swingHigh}
+                  color={trendUp ? SWING_ORIGIN_COLOR : SL_REF_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed={false}
                   strokeWidth={1.5}
@@ -399,44 +410,44 @@ export function FibChart() {
 
                 {/* 61.8% — Golden Retracement */}
                 <FibLine
-                  label="61.8% · Golden Retracement (Primary Entry Zone)"
+                  label="61.8% · Entry Zone (Atas)"
                   price={fibLevels.level618}
-                  color={C.gold}
+                  color={ZONE_618_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed
-                  strokeWidth={1.2}
+                  strokeWidth={1.3}
                 />
 
                 {/* 78.6% — Deep Retracement */}
                 <FibLine
-                  label="78.6% · Deep Retracement (Final Defense Zone)"
+                  label="78.6% · Entry Zone (Bawah)"
                   price={fibLevels.level786}
-                  color="#FBBF24"
+                  color={ZONE_786_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed
-                  strokeWidth={1.2}
+                  strokeWidth={1.3}
                 />
 
-                {/* 100% — Swing Low (Bullish) or Swing High (Bearish) */}
+                {/* Swing Low (Bullish: origin / Bearish: opposite extreme) */}
                 <FibLine
                   label={trendUp
-                    ? "100% · Swing Low (SL Reference)"
-                    : "100% · Swing High (SL Reference)"}
-                  price={trendUp ? fibLevels.swingLow : fibLevels.swingHigh}
-                  color={trendUp ? C.red : C.green}
+                    ? "Swing Low · Origin (SL Ref)"
+                    : "Swing Low · Origin"}
+                  price={fibLevels.swingLow}
+                  color={trendUp ? SL_REF_COLOR : SWING_ORIGIN_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed={false}
-                  strokeWidth={1}
+                  strokeWidth={1.5}
                 />
 
-                {/* -27% Extension — Take Profit Target */}
+                {/* -27% Extension — Take Profit Target (always GREEN) */}
                 <FibLine
-                  label="-27% Extension (Take Profit Target)"
+                  label="TP · -27% Extension"
                   price={fibLevels.extensionNeg27}
-                  color={C.blue}
+                  color={TP_TARGET_COLOR}
                   lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                   dashed
-                  strokeWidth={1.5}
+                  strokeWidth={1.8}
                 />
               </>
             );
@@ -530,31 +541,34 @@ export function FibChart() {
           {/* ── Signal levels (Entry / SL / TP) ── */}
           {currentSignal && (
             <>
+              {/* ENTRY — White/Yellow, solid, thick */}
               <FibLine
-                label={`ENTRY ${currentSignal.trend === "Bullish" ? "BUY" : "SELL"}`}
+                label={`⬤ ENTRY ${currentSignal.trend === "Bullish" ? "BUY" : "SELL"}`}
                 price={currentSignal.entryPrice}
-                color={currentSignal.trend === "Bullish" ? C.green : C.red}
+                color="#FACC15"
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                 dashed={false}
+                strokeWidth={2.5}
+                labelSide="right"
+              />
+              {/* STOP LOSS — always Red */}
+              <FibLine
+                label="✕ STOP LOSS"
+                price={currentSignal.stopLoss}
+                color="#EF4444"
+                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+                dashed
                 strokeWidth={2}
                 labelSide="right"
               />
+              {/* TAKE PROFIT — always Green */}
               <FibLine
-                label="STOP LOSS"
-                price={currentSignal.stopLoss}
-                color={C.red}
-                lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed
-                strokeWidth={1.5}
-                labelSide="right"
-              />
-              <FibLine
-                label="TAKE PROFIT (-27%)"
+                label="✓ TAKE PROFIT"
                 price={currentSignal.takeProfit}
-                color={C.blue}
+                color="#22C55E"
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                 dashed
-                strokeWidth={1.5}
+                strokeWidth={2}
                 labelSide="right"
               />
             </>
@@ -603,12 +617,13 @@ export function FibChart() {
 
       {/* Legend */}
       <View style={styles.legend}>
-        <LegItem color={C.gold} label="61.8% Zone" box />
-        <LegItem color="#FBBF24" label="78.6% Zone" box />
-        <LegItem color={C.blue} label="-27% TP" />
+        <LegItem color="#C084FC" label="Swing" line />
+        <LegItem color="#F0B429" label="61.8%" box />
+        <LegItem color="#F97316" label="78.6%" box />
+        <LegItem color="#22C55E" label="TP Target" />
+        <LegItem color="#EF4444" label="SL Ref" />
         <LegItem color="#A78BFA" label="EMA50" line />
         <LegItem color="#F97316" label="EMA200" line />
-        {currentSignal && <LegItem color={C.red} label="Stop Loss" />}
       </View>
 
       {hasNoData && (

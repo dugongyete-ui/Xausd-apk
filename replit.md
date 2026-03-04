@@ -24,10 +24,14 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 - **Theme**: Dark navy trading terminal (#0A0E17 bg, #F0B429 gold accent)
 - **Navigation**: 3-tab layout (Dashboard, Signals, Settings)
 
-### Backend (Express)
+### Backend (Express + DerivService)
 - Port 5000
 - Serves landing page + static Expo assets
-- No custom API routes needed (all data comes from Deriv WebSocket directly in the app)
+- **DerivService** (`server/derivService.ts`): persistent Deriv WebSocket connection that runs 24/7
+  - Connects to Deriv on server startup, auto-reconnects on disconnect
+  - Runs full analysis pipeline: EMA50/200, swing detection, Fibonacci, signal detection
+  - API endpoints: `GET /api/market-state`, `GET /api/signals`, `GET /api/health`
+  - Runs continuously even when no user has the app open (background server)
 
 ### Data Source
 - **WebSocket**: `wss://ws.derivws.com/websockets/v3?app_id=114791`
@@ -51,21 +55,29 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 
 ## Trading Strategy Implementation
 
-### 1. Data: Deriv WebSocket M5 candles, 200 candle buffer, auto-reconnect
-### 2. Trend Detection: EMA50 and EMA200
+### 1. Data: Deriv WebSocket M5+M15 candles, auto-reconnect
+### 2. Trend Detection (TREND ALIGNMENT RULE): EMA50 and EMA200 on M15
 - Bullish: close > EMA200 AND EMA50 > EMA200
-- Bearish: close < EMA200 AND EMA50 < EMA200
-- Otherwise: No Trade
-### 3. Swing Detection: 5-candle fractal (2 left + pivot + 2 right)
-### 4. Fibonacci Calculation:
-- Bullish: from Swing Low → Swing High
-- Bearish: from Swing High → Swing Low
+- Bearish: close < EMA200 AND EMA50 < EMA200 → Fibonacci drawn High→Low
+- Otherwise: No Trade — Fibonacci NOT generated
+### 3. Swing Detection (SWING VALIDATION RULE): Strict 5-bar fractal on M15
+- Swing High valid: High[i] > High[i-1] & High[i-2] AND High[i] > High[i+1] & High[i+2]
+- Swing Low valid: Low[i] < Low[i-1] & Low[i-2] AND Low[i] < Low[i+1] & Low[i+2]
+- Uses LATEST swing ALIGNED with EMA trend direction
+### 4. Fibonacci Calculation (FIBONACCI STABILITY RULE):
+- Zones are STATIC — only recalculate when a new M15 swing forms
+- Bearish: High → Low (retracement zone above current price)
+- Bullish: Low → High (retracement zone below current price)
 - Levels: 61.8%, 78.6%, -27% extension
-### 5. Entry: Price in 61.8%–78.6% band + candle confirmation (wick > body)
-### 6. Stop Loss: 78.6% ± (0.5 × ATR14)
+- Fibonacci does NOT update every candle — tracked via lastSwingRef
+### 5. Entry (ENTRY VALIDATION RULE on M5):
+- SELL: Price in 61.8–78.6 zone + Close bearish (close < open) + Upper wick > body
+- BUY:  Price in 61.8–78.6 zone + Close bullish + Lower wick >= 1.5x body
+- OR: Engulfing pattern (prev candle engulfed by current)
+### 6. Stop Loss: Swing Low (Buy) or Swing High (Sell)
 ### 7. Take Profit: -27% Fibonacci extension
 ### 8. Position Sizing: Lot = (1% × Balance) / SL distance
-### 9. Filters: Min SL distance (spread×3), min ATR, max 1 active signal
+### 9. Filters: Min SL distance (0.1 × ATR14), max 1 active signal per zone-bucket
 
 ## Signal Output Fields
 - Pair, Timeframe, Trend, Entry Price, Stop Loss, Take Profit

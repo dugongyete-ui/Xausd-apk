@@ -12,10 +12,45 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 import { Platform } from "react-native";
 import {
   requestNotificationPermission,
+  getExpoPushToken,
   sendSignalNotification,
   sendTPAlert,
   sendSLAlert,
 } from "@/services/NotificationService";
+
+// Backend URL — server yang jalan 24/7 untuk kirim push ke device
+const BACKEND_URL = (() => {
+  if (typeof process !== "undefined" && process.env.EXPO_PUBLIC_DOMAIN) {
+    return `https://${process.env.EXPO_PUBLIC_DOMAIN}`;
+  }
+  return "";
+})();
+
+async function registerPushTokenWithBackend(token: string): Promise<void> {
+  if (!BACKEND_URL) return;
+  try {
+    await fetch(`${BACKEND_URL}/api/register-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+  } catch (e) {
+    console.warn("[TradingContext] Failed to register push token:", e);
+  }
+}
+
+async function unregisterPushTokenFromBackend(token: string): Promise<void> {
+  if (!BACKEND_URL) return;
+  try {
+    await fetch(`${BACKEND_URL}/api/unregister-token`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ token }),
+    });
+  } catch (e) {
+    console.warn("[TradingContext] Failed to unregister push token:", e);
+  }
+}
 
 export interface Candle {
   open: number;
@@ -240,7 +275,8 @@ function calcFib(swingHigh: number, swingLow: number, trend: "Bullish" | "Bearis
 }
 
 // ─── M5 Entry confirmation ───────────────────────────────────────────────────
-// Checks latest M5 candle for rejection (pin bar) pattern
+// SELL validation (Bearish): Close bearish (close < open) + Upper wick > body
+// BUY  validation (Bullish): Close bullish (close > open) + Lower wick >= 1.5x body
 function checkRejection(candle: Candle, trend: "Bullish" | "Bearish"): boolean {
   const body = Math.abs(candle.close - candle.open);
   if (body === 0) return false;
@@ -248,8 +284,9 @@ function checkRejection(candle: Candle, trend: "Bullish" | "Bearish"): boolean {
     const lowerWick = Math.min(candle.open, candle.close) - candle.low;
     return candle.close > candle.open && lowerWick >= body * 1.5;
   }
+  // SELL: must close bearish AND upper wick must be greater than body
   const upperWick = candle.high - Math.max(candle.open, candle.close);
-  return candle.close < candle.open && upperWick >= body * 1.5;
+  return candle.close < candle.open && upperWick > body;
 }
 
 // Checks last two M5 candles for engulfing pattern
@@ -298,14 +335,16 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const [marketState, setMarketState] = useState<MarketState>(forexMarketOpen() ? "open" : "closed");
   const [marketNextOpen, setMarketNextOpen] = useState(nextOpenDesc());
   const [notificationEnabled, setNotificationEnabled] = useState<boolean>(false);
+  const pushTokenRef = useRef<string | null>(null);
 
   const wsRef = useRef<WebSocket | null>(null);
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const marketCheckTimer = useRef<ReturnType<typeof setInterval> | null>(null);
   const savedSignalKeys = useRef<Set<string>>(new Set());
   const wasOpenRef = useRef<boolean>(forexMarketOpen());
-  // Flag: Deriv itself says market is closed — suppress auto-reconnect until market check says otherwise
   const derivMarketClosedRef = useRef<boolean>(false);
+  // FIBONACCI STABILITY RULE: track last swing to avoid recalculating every candle
+  const lastSwingRef = useRef<{ swingHigh: number; swingLow: number; trend: string } | null>(null);
 
   // ─── Startup: load all cached data instantly ──────────────────────────────
   useEffect(() => {
@@ -354,10 +393,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    // Request notification permission on native only
+    // Request notification permission + register push token dengan backend
     if (Platform.OS !== "web") {
-      requestNotificationPermission().then((granted) => {
+      requestNotificationPermission().then(async (granted) => {
         setNotificationEnabled(granted);
+        if (granted) {
+          const token = await getExpoPushToken();
+          if (token) {
+            pushTokenRef.current = token;
+            await registerPushTokenWithBackend(token);
+            console.log("[TradingContext] Push token registered:", token.slice(0, 40) + "...");
+          }
+        }
       });
     }
   }, []);
@@ -386,8 +433,18 @@ export function TradingProvider({ children }: { children: ReactNode }) {
 
   const requestNotifications = useCallback(() => {
     if (Platform.OS !== "web") {
-      requestNotificationPermission().then((granted) => {
+      requestNotificationPermission().then(async (granted) => {
         setNotificationEnabled(granted);
+        if (granted) {
+          const token = await getExpoPushToken();
+          if (token) {
+            pushTokenRef.current = token;
+            await registerPushTokenWithBackend(token);
+          }
+        } else if (pushTokenRef.current) {
+          await unregisterPushTokenFromBackend(pushTokenRef.current);
+          pushTokenRef.current = null;
+        }
       });
     }
   }, []);
@@ -613,12 +670,40 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     return calcATR(m15Candles, ATR_PERIOD);
   }, [m15Candles]);
 
-  // Fibonacci levels from M15 swings — uses trend-aware swing detection
-  const fibLevels = useMemo((): FibLevels | null => {
-    if (trend === "Loading" || trend === "No Trade") return null;
+  // ─── FIBONACCI STABILITY RULE ─────────────────────────────────────────────
+  // Fibonacci zones are STATIC — they only update when a NEW swing forms on M15.
+  // This prevents the zones from jumping around on every candle tick.
+  const [fibLevels, setFibLevels] = useState<FibLevels | null>(null);
+
+  useEffect(() => {
+    if (trend === "Loading" || trend === "No Trade") {
+      if (lastSwingRef.current !== null) {
+        lastSwingRef.current = null;
+        setFibLevels(null);
+      }
+      return;
+    }
+
     const swings = findSwings(m15Candles, trend);
-    if (!swings) return null;
-    return calcFib(swings.swingHigh, swings.swingLow, trend);
+    if (!swings) {
+      if (lastSwingRef.current !== null) {
+        lastSwingRef.current = null;
+        setFibLevels(null);
+      }
+      return;
+    }
+
+    const last = lastSwingRef.current;
+    // Only recalculate Fibonacci if the swing high/low actually changed
+    if (
+      !last ||
+      last.trend !== trend ||
+      last.swingHigh !== swings.swingHigh ||
+      last.swingLow !== swings.swingLow
+    ) {
+      lastSwingRef.current = { swingHigh: swings.swingHigh, swingLow: swings.swingLow, trend };
+      setFibLevels(calcFib(swings.swingHigh, swings.swingLow, trend as "Bullish" | "Bearish"));
+    }
   }, [m15Candles, trend]);
 
   // Is current M5 price inside M15 Fibonacci zone?
