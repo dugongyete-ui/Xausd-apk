@@ -161,7 +161,7 @@ function serveLandingPage({
   res.status(200).send(html);
 }
 
-function configureExpoAndLanding(app: express.Application) {
+async function configureExpoAndLanding(app: express.Application) {
   const templatePath = path.resolve(
     process.cwd(),
     "server",
@@ -188,6 +188,11 @@ function configureExpoAndLanding(app: express.Application) {
     }
 
     if (req.path === "/") {
+      const ua = req.header("user-agent") || "";
+      const isWebBrowser = ua.includes("Mozilla") && !platform;
+      if (isWebBrowser) {
+        return next();
+      }
       return serveLandingPage({
         req,
         res,
@@ -201,6 +206,26 @@ function configureExpoAndLanding(app: express.Application) {
 
   app.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
   app.use(express.static(path.resolve(process.cwd(), "static-build")));
+
+  // Proxy web browser requests to Expo web dev server (port 8081)
+  try {
+    const { createProxyMiddleware } = await import("http-proxy-middleware");
+    app.use(
+      createProxyMiddleware({
+        target: "http://localhost:8081",
+        changeOrigin: true,
+        ws: false,
+        on: {
+          error: (_err: unknown, _req: unknown, res: unknown) => {
+            (res as import("express").Response).status(502).send("Expo web server not ready yet");
+          },
+        },
+      })
+    );
+    log("Expo web proxy: forwarding non-static requests to port 8081");
+  } catch {
+    log("http-proxy-middleware not available, skipping web proxy");
+  }
 
   log("Expo routing: Checking expo-platform header on / and /manifest");
 }
@@ -231,7 +256,7 @@ function setupErrorHandler(app: express.Application) {
   setupBodyParsing(app);
   setupRequestLogging(app);
 
-  configureExpoAndLanding(app);
+  await configureExpoAndLanding(app);
 
   const server = await registerRoutes(app);
 
