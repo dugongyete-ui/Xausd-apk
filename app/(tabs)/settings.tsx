@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Platform,
-  TextInput,
   Pressable,
   ScrollView,
   Alert,
@@ -56,9 +55,7 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === "web" ? 67 : insets.top;
   const botPad = Platform.OS === "web" ? 84 : insets.bottom + 60;
-  const { balance, setBalance, atr, connectionStatus, candles, notificationEnabled, requestNotifications, injectDemoSignal, clearDemoSignal, activeSignal, currentPrice } = useTrading();
-  const [inputBalance, setInputBalance] = useState(String(balance));
-  const [saved, setSaved] = useState(false);
+  const { atr, connectionStatus, candles, notificationEnabled, requestNotifications, injectDemoSignal, clearDemoSignal, activeSignal, currentPrice } = useTrading();
   const [demoSent, setDemoSent] = useState<"BUY" | "SELL" | null>(null);
 
   const handleDemoSignal = (type: "BUY" | "SELL") => {
@@ -74,20 +71,6 @@ export default function SettingsScreen() {
     setDemoSent(null);
   };
 
-  const handleSave = () => {
-    const val = parseFloat(inputBalance.replace(/,/g, ""));
-    if (isNaN(val) || val <= 0) {
-      Alert.alert("Invalid Balance", "Please enter a valid positive number.");
-      return;
-    }
-    setBalance(val);
-    setSaved(true);
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    setTimeout(() => setSaved(false), 2000);
-  };
-
-  const riskAmount = balance * 0.01;
-
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
       <ScrollView
@@ -97,41 +80,6 @@ export default function SettingsScreen() {
         <View style={styles.header}>
           <Text style={styles.headerTitle}>Settings</Text>
           <Text style={styles.headerSub}>Risk Management & Strategy</Text>
-        </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>ACCOUNT BALANCE</Text>
-          <View style={styles.balanceCard}>
-            <View style={styles.balanceInputRow}>
-              <View style={styles.currencyTag}>
-                <Text style={styles.currencyText}>USD</Text>
-              </View>
-              <TextInput
-                style={styles.balanceInput}
-                value={inputBalance}
-                onChangeText={setInputBalance}
-                keyboardType="decimal-pad"
-                placeholderTextColor={C.textDim}
-                placeholder="10000"
-                returnKeyType="done"
-                onSubmitEditing={handleSave}
-              />
-            </View>
-            <Pressable
-              onPress={handleSave}
-              style={({ pressed }) => [
-                styles.saveBtn,
-                { opacity: pressed ? 0.8 : 1, backgroundColor: saved ? C.green : C.gold },
-              ]}
-            >
-              <Ionicons
-                name={saved ? "checkmark" : "save-outline"}
-                size={18}
-                color={C.bg}
-              />
-              <Text style={styles.saveBtnText}>{saved ? "Saved!" : "Save Balance"}</Text>
-            </Pressable>
-          </View>
         </View>
 
         {/* ─── Demo Signal Tester ─── */}
@@ -201,13 +149,6 @@ export default function SettingsScreen() {
             />
             <View style={styles.divider} />
             <InfoRow
-              icon="currency-usd"
-              label="Risk Amount"
-              value={`$${riskAmount.toFixed(2)}`}
-              valueColor={C.green}
-            />
-            <View style={styles.divider} />
-            <InfoRow
               icon="sigma"
               label="ATR (14)"
               value={atr !== null ? atr.toFixed(3) : "—"}
@@ -271,10 +212,6 @@ export default function SettingsScreen() {
             <StrategyRule
               title="Take Profit"
               detail="TP = Swing Low (bearish) · Swing High (bullish) — level 0%/100%"
-            />
-            <StrategyRule
-              title="Position Size"
-              detail="Lot = (1% × Balance) / SL distance"
             />
             <StrategyRule
               title="Trade Filter"
@@ -420,57 +357,6 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     fontSize: 14,
     color: C.textSub,
-  },
-  balanceCard: {
-    backgroundColor: C.card,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: C.border,
-    padding: 16,
-    gap: 12,
-  },
-  balanceInputRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    backgroundColor: C.cardAlt,
-    borderRadius: 12,
-    borderWidth: 1,
-    borderColor: C.border,
-    overflow: "hidden",
-  },
-  currencyTag: {
-    backgroundColor: C.goldBg,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderRightWidth: 1,
-    borderRightColor: C.border,
-  },
-  currencyText: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 13,
-    color: C.gold,
-    letterSpacing: 1,
-  },
-  balanceInput: {
-    flex: 1,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    fontFamily: "Inter_600SemiBold",
-    fontSize: 20,
-    color: C.text,
-  },
-  saveBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 8,
-    borderRadius: 12,
-    paddingVertical: 14,
-  },
-  saveBtnText: {
-    fontFamily: "Inter_700Bold",
-    fontSize: 14,
-    color: C.bg,
   },
   ruleRow: {
     flexDirection: "row",
