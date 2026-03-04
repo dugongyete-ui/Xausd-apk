@@ -20,9 +20,9 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 ### Data Source
 - **WebSocket**: `wss://ws.derivws.com/websockets/v3?app_id=114791`
 - **Pair**: XAUUSD (frxXAUUSD)
-- **Timeframe**: M5 (300 second granularity)
-- **Buffer**: 200 candles
-- **Auto-reconnect**: 3 second delay on disconnect
+- **M15**: 900 granularity, 300 candles (EMA50/200 + Fibonacci swing detection)
+- **M5**: 300 granularity, 100 candles (precision entry confirmation)
+- **Auto-reconnect**: 3 second delay; maintenance/weekend handled gracefully
 
 ## Key Files
 
@@ -34,6 +34,8 @@ A professional mobile trading analysis app built with Expo (React Native) that p
 | `app/(tabs)/settings.tsx` | Balance input, risk params, strategy reference |
 | `app/(tabs)/_layout.tsx` | Tab navigation (NativeTabs for iOS 26 liquid glass, Tabs fallback) |
 | `constants/colors.ts` | Design token colors |
+| `components/FibChart.tsx` | Interactive chart with M5/M15 timeframe selector |
+| `services/NotificationService.ts` | Push notifications: signal, TP, SL alerts |
 
 ## Trading Strategy Implementation
 

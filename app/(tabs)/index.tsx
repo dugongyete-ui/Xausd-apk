@@ -71,7 +71,7 @@ function ConnectionBar({
     <View style={styles.statusRow}>
       <PulseDot color={color} />
       <Text style={[styles.statusLabel, { color }]}>{label}</Text>
-      <Text style={styles.statusPair}>XAUUSD · M5</Text>
+      <Text style={styles.statusPair}>XAUUSD · M15/M5</Text>
     </View>
   );
 }
@@ -179,7 +179,7 @@ function EMARow() {
       <View style={styles.emaItem}>
         <Text style={styles.emaLabel}>M15</Text>
         <Text style={[styles.emaValue, { color: m15Candles.length >= 200 ? C.green : C.gold }]}>
-          {m15Candles.length}/200
+          {m15Candles.length}/300
         </Text>
       </View>
       {/* EMA 50 from M15 */}
@@ -197,7 +197,7 @@ function EMARow() {
       <View style={styles.emaItem}>
         <Text style={styles.emaLabel}>M5</Text>
         <Text style={[styles.emaValue, { color: candles.length > 0 ? C.green : C.textDim }]}>
-          {candles.length}/50
+          {candles.length}/100
         </Text>
       </View>
     </View>
@@ -307,7 +307,7 @@ function SignalCard() {
   if (!currentSignal) {
     const loadMsg =
       trend === "Loading"
-        ? `Memuat M15: ${m15Candles.length}/200 candle untuk EMA200...`
+        ? `Memuat M15: ${m15Candles.length}/300 candle (EMA siap setelah 200)...`
         : trend === "No Trade"
         ? "Trend belum jelas — EMA50 & EMA200 M15 harus sejajar"
         : inZone

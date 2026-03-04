@@ -86,19 +86,19 @@ const SYMBOL = "frxXAUUSD";
 
 // M15 — structure: EMA50/200, swing detection, Fibonacci zones
 const M15_GRAN = 900;
-const M15_COUNT = 200;
+const M15_COUNT = 300;
 
 // M5 — precision entry: rejection/engulfing confirmation
 const M5_GRAN = 300;
-const M5_COUNT = 50;
+const M5_COUNT = 100;
 
 const ATR_PERIOD = 14;
 const EMA50_PERIOD = 50;
 const EMA200_PERIOD = 200;
 const STORAGE_KEY_SIGNALS = "fibo_signals_v2";
 const STORAGE_KEY_BALANCE = "fibo_balance_v1";
-const STORAGE_KEY_M15 = "fibo_m15_candles_v1";
-const STORAGE_KEY_M5 = "fibo_m5_candles_v1";
+const STORAGE_KEY_M15 = "fibo_m15_candles_v2";
+const STORAGE_KEY_M5 = "fibo_m5_candles_v2";
 
 // ─── Market hours ───────────────────────────────────────────────────────────
 function forexMarketOpen(): boolean {

@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import { View, Text, StyleSheet } from "react-native";
+import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import Svg, {
   Rect,
   Line,
@@ -14,11 +14,13 @@ import Svg, {
 import C from "@/constants/colors";
 import { useTrading, calcEMAFull } from "@/contexts/TradingContext";
 
-const CHART_HEIGHT = 310;
-const RIGHT_W = 54;
+const CHART_HEIGHT = 320;
+const RIGHT_W = 58;
 const TOP_PAD = 14;
 const BOT_PAD = 14;
 const VISIBLE_CANDLES = 40;
+
+type TF = "M5" | "M15";
 
 function priceToY(p: number, lo: number, hi: number, plotH: number): number {
   if (hi === lo) return plotH / 2;
@@ -38,7 +40,6 @@ function dashes(x1: number, y: number, x2: number, dash = 5, gap = 3): string {
   return d;
 }
 
-// Labeled line on the chart — draws inline label at left + price at right
 interface LabeledLineProps {
   label: string;
   sublabel?: string;
@@ -69,46 +70,31 @@ function LabeledLine({
 }: LabeledLineProps) {
   const y = priceToY(price, lo, hi, plotH);
   if (y < TOP_PAD - 4 || y > TOP_PAD + plotH + 4) return null;
-
   const ly = y + labelOffset;
-
   return (
     <G>
-      {/* Line */}
       {dashed ? (
         <Path d={dashes(0, y, plotW - 1)} stroke={color} strokeWidth={strokeWidth} opacity={0.75} />
       ) : (
         <Line x1={0} y1={y} x2={plotW - 1} y2={y} stroke={color} strokeWidth={strokeWidth} opacity={0.9} />
       )}
-
-      {/* Arrow triangle for swing points */}
       {showArrow === "up" && (
         <Polygon
           points={`${plotW - 16},${y + 6} ${plotW - 10},${y - 2} ${plotW - 4},${y + 6}`}
-          fill={color}
-          opacity={0.95}
+          fill={color} opacity={0.95}
         />
       )}
       {showArrow === "down" && (
         <Polygon
           points={`${plotW - 16},${y - 6} ${plotW - 10},${y + 2} ${plotW - 4},${y - 6}`}
-          fill={color}
-          opacity={0.95}
+          fill={color} opacity={0.95}
         />
       )}
-
-      {/* Inline label — semi-transparent bg pill */}
       <Rect x={2} y={ly - 9} width={sublabel ? 82 : 72} height={sublabel ? 20 : 12} fill="#0A0E17" opacity={0.72} rx={3} />
-      <SvgText x={5} y={ly} fill={color} fontSize={8.5} fontWeight="bold">
-        {label}
-      </SvgText>
+      <SvgText x={5} y={ly} fill={color} fontSize={8.5} fontWeight="bold">{label}</SvgText>
       {sublabel && (
-        <SvgText x={5} y={ly + 9} fill={color} fontSize={7} opacity={0.75}>
-          {sublabel}
-        </SvgText>
+        <SvgText x={5} y={ly + 9} fill={color} fontSize={7} opacity={0.75}>{sublabel}</SvgText>
       )}
-
-      {/* Right price label */}
       <SvgText x={plotW + 2} y={y + 4} fill={color} fontSize={8} fontWeight="bold">
         {price.toFixed(1)}
       </SvgText>
@@ -125,53 +111,78 @@ export function FibChart() {
     currentSignal,
     trend,
   } = useTrading();
-  const [chartW, setChartW] = useState(0);
 
-  const visibleCandles = useMemo(
-    () => (candles.length === 0 ? [] : candles.slice(-VISIBLE_CANDLES)),
-    [candles]
-  );
+  const [chartW, setChartW] = useState(0);
+  const [selectedTF, setSelectedTF] = useState<TF>("M15");
+
+  const visibleCandles = useMemo(() => {
+    const src = selectedTF === "M15" ? m15Candles : candles;
+    return src.length === 0 ? [] : src.slice(-VISIBLE_CANDLES);
+  }, [selectedTF, candles, m15Candles]);
+
+  const ema50FromM15 = useMemo(() => {
+    if (m15Candles.length < 50) return [];
+    return calcEMAFull(m15Candles.map((c) => c.close), 50);
+  }, [m15Candles]);
+
+  const ema200FromM15 = useMemo(() => {
+    if (m15Candles.length < 200) return [];
+    return calcEMAFull(m15Candles.map((c) => c.close), 200);
+  }, [m15Candles]);
 
   const ema50Series = useMemo(() => {
+    if (selectedTF === "M15") return ema50FromM15.slice(-VISIBLE_CANDLES);
     if (candles.length < 50) return [];
     return calcEMAFull(candles.map((c) => c.close), 50).slice(-VISIBLE_CANDLES);
-  }, [candles]);
+  }, [selectedTF, ema50FromM15, candles]);
 
   const ema200Series = useMemo(() => {
-    if (candles.length < 200) return [];
-    return calcEMAFull(candles.map((c) => c.close), 200).slice(-VISIBLE_CANDLES);
-  }, [candles]);
+    if (selectedTF === "M15") return ema200FromM15.slice(-VISIBLE_CANDLES);
+    return [];
+  }, [selectedTF, ema200FromM15]);
+
+  const m15Ema50Val = useMemo(() => {
+    if (ema50FromM15.length === 0) return null;
+    return ema50FromM15[ema50FromM15.length - 1];
+  }, [ema50FromM15]);
+
+  const m15Ema200Val = useMemo(() => {
+    if (ema200FromM15.length === 0) return null;
+    return ema200FromM15[ema200FromM15.length - 1];
+  }, [ema200FromM15]);
 
   const { lo, hi } = useMemo(() => {
-    let loV =
-      visibleCandles.length > 0
-        ? Math.min(...visibleCandles.map((c) => c.low))
-        : 3200;
-    let hiV =
-      visibleCandles.length > 0
-        ? Math.max(...visibleCandles.map((c) => c.high))
-        : 3300;
+    let loV = visibleCandles.length > 0 ? Math.min(...visibleCandles.map((c) => c.low)) : 3200;
+    let hiV = visibleCandles.length > 0 ? Math.max(...visibleCandles.map((c) => c.high)) : 3300;
     if (fibLevels) {
-      loV = Math.min(loV, fibLevels.swingLow, fibLevels.extensionNeg27, fibLevels.level786, fibLevels.level618);
-      hiV = Math.max(hiV, fibLevels.swingHigh, fibLevels.extensionNeg27, fibLevels.level618, fibLevels.level786);
+      loV = Math.min(loV, fibLevels.swingLow, fibLevels.extensionNeg27);
+      hiV = Math.max(hiV, fibLevels.swingHigh);
     }
     if (currentSignal) {
       loV = Math.min(loV, currentSignal.stopLoss, currentSignal.takeProfit);
       hiV = Math.max(hiV, currentSignal.stopLoss, currentSignal.takeProfit);
     }
+    if (selectedTF === "M5" && m15Ema50Val) {
+      loV = Math.min(loV, m15Ema50Val);
+      hiV = Math.max(hiV, m15Ema50Val);
+    }
+    if (selectedTF === "M5" && m15Ema200Val) {
+      loV = Math.min(loV, m15Ema200Val);
+      hiV = Math.max(hiV, m15Ema200Val);
+    }
     const pad = (hiV - loV) * 0.10;
     return { lo: loV - pad, hi: hiV + pad };
-  }, [visibleCandles, fibLevels, currentSignal]);
+  }, [visibleCandles, fibLevels, currentSignal, selectedTF, m15Ema50Val, m15Ema200Val]);
 
   const plotW = chartW - RIGHT_W;
   const plotH = CHART_HEIGHT - TOP_PAD - BOT_PAD;
   const candleW = visibleCandles.length > 0 ? plotW / visibleCandles.length : 8;
   const bodyW = Math.max(1, candleW - 1.5);
 
-  function emaPath(series: number[]): string {
+  function emaPath(series: number[], totalCandles: number): string {
     let d = "";
     let started = false;
-    const step = plotW / series.length;
+    const step = plotW / totalCandles;
     for (let i = 0; i < series.length; i++) {
       const v = series[i];
       if (isNaN(v)) { started = false; continue; }
@@ -183,17 +194,18 @@ export function FibChart() {
     return d;
   }
 
-  // Zone shading between 61.8 and 78.6
   const zoneY1 = fibLevels ? Math.min(priceToY(fibLevels.level618, lo, hi, plotH), priceToY(fibLevels.level786, lo, hi, plotH)) : null;
   const zoneY2 = fibLevels ? Math.max(priceToY(fibLevels.level618, lo, hi, plotH), priceToY(fibLevels.level786, lo, hi, plotH)) : null;
 
   const trendLabel =
     trend === "Bullish" ? "▲ BULLISH" :
     trend === "Bearish" ? "▼ BEARISH" :
-    trend === "Loading" ? "LOADING..." : "NO TREND";
+    trend === "Loading" ? `LOADING ${m15Candles.length}/300` : "NO TREND";
   const trendColor =
     trend === "Bullish" ? C.green :
     trend === "Bearish" ? C.red : C.textDim;
+
+  const hasNoData = candles.length === 0 && m15Candles.length === 0;
 
   return (
     <View
@@ -202,8 +214,31 @@ export function FibChart() {
     >
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>M15 ZONA  ·  M5 ENTRY  ·  XAUUSD</Text>
+        <View style={styles.headerLeft}>
+          <Text style={styles.title}>XAUUSD  ·  ANALISIS FIBONACCI</Text>
+        </View>
         <Text style={[styles.trendLabel, { color: trendColor }]}>{trendLabel}</Text>
+      </View>
+
+      {/* Timeframe Selector */}
+      <View style={styles.tfRow}>
+        {(["M5", "M15"] as TF[]).map((tf) => (
+          <TouchableOpacity
+            key={tf}
+            style={[styles.tfBtn, selectedTF === tf && styles.tfBtnActive]}
+            onPress={() => setSelectedTF(tf)}
+            activeOpacity={0.7}
+          >
+            <Text style={[styles.tfBtnText, selectedTF === tf && styles.tfBtnTextActive]}>
+              {tf}
+            </Text>
+          </TouchableOpacity>
+        ))}
+        <Text style={styles.tfSubtitle}>
+          {selectedTF === "M15"
+            ? `${m15Candles.length} candle · Zona Fibonacci`
+            : `${candles.length} candle · Entry Presisi`}
+        </Text>
       </View>
 
       {chartW > 0 && (
@@ -215,7 +250,7 @@ export function FibChart() {
             </LinearGradient>
           </Defs>
 
-          {/* Subtle grid lines */}
+          {/* Grid lines */}
           {[0.1, 0.3, 0.5, 0.7, 0.9].map((pct, i) => {
             const price = lo + (hi - lo) * (1 - pct);
             const y = priceToY(price, lo, hi, plotH);
@@ -225,29 +260,14 @@ export function FibChart() {
             );
           })}
 
-          {/* Entry zone gold shading */}
+          {/* Fibonacci zone gold shading */}
           {fibLevels && zoneY1 !== null && zoneY2 !== null && (
             <G>
-              <Rect
-                x={0} y={zoneY1}
-                width={plotW}
-                height={Math.max(2, zoneY2 - zoneY1)}
-                fill="url(#zoneGrad)"
-              />
-              {/* Zone label in the center of the zone */}
+              <Rect x={0} y={zoneY1} width={plotW} height={Math.max(2, zoneY2 - zoneY1)} fill="url(#zoneGrad)" />
               {(zoneY2 - zoneY1) > 14 && (
                 <G>
-                  <Rect
-                    x={plotW / 2 - 45}
-                    y={(zoneY1 + zoneY2) / 2 - 8}
-                    width={90} height={14}
-                    fill="#0A0E17" opacity={0.65} rx={4}
-                  />
-                  <SvgText
-                    x={plotW / 2} y={(zoneY1 + zoneY2) / 2 + 4}
-                    fill={C.gold} fontSize={8.5} fontWeight="bold"
-                    textAnchor="middle"
-                  >
+                  <Rect x={plotW / 2 - 45} y={(zoneY1 + zoneY2) / 2 - 8} width={90} height={14} fill="#0A0E17" opacity={0.65} rx={4} />
+                  <SvgText x={plotW / 2} y={(zoneY1 + zoneY2) / 2 + 4} fill={C.gold} fontSize={8.5} fontWeight="bold" textAnchor="middle">
                     ZONA ENTRY (61.8–78.6%)
                   </SvgText>
                 </G>
@@ -255,14 +275,37 @@ export function FibChart() {
             </G>
           )}
 
-          {/* EMA 200 (orange) */}
-          {ema200Series.length > 0 && (
-            <Path d={emaPath(ema200Series)} stroke="#F97316" strokeWidth={1.5} fill="none" opacity={0.8} />
+          {/* EMA lines (M15 chart — calculated from M15 candles) */}
+          {selectedTF === "M15" && ema200Series.length > 0 && (
+            <Path d={emaPath(ema200Series, ema200Series.length)} stroke="#F97316" strokeWidth={1.5} fill="none" opacity={0.85} />
+          )}
+          {selectedTF === "M15" && ema50Series.length > 0 && (
+            <Path d={emaPath(ema50Series, ema50Series.length)} stroke="#A78BFA" strokeWidth={1.5} fill="none" opacity={0.85} />
           )}
 
-          {/* EMA 50 (purple) */}
-          {ema50Series.length > 0 && (
-            <Path d={emaPath(ema50Series)} stroke="#A78BFA" strokeWidth={1.5} fill="none" opacity={0.8} />
+          {/* EMA lines (M5 chart — drawn as horizontal M15 EMA reference lines) */}
+          {selectedTF === "M5" && m15Ema200Val !== null && (
+            <LabeledLine
+              label="M15 EMA200"
+              sublabel={m15Ema200Val.toFixed(1)}
+              price={m15Ema200Val}
+              color="#F97316"
+              lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+              dashed strokeWidth={1.5}
+            />
+          )}
+          {selectedTF === "M5" && m15Ema50Val !== null && (
+            <LabeledLine
+              label="M15 EMA50"
+              sublabel={m15Ema50Val.toFixed(1)}
+              price={m15Ema50Val}
+              color="#A78BFA"
+              lo={lo} hi={hi} plotH={plotH} plotW={plotW}
+              dashed strokeWidth={1.5}
+            />
+          )}
+          {selectedTF === "M5" && ema50Series.length > 0 && (
+            <Path d={emaPath(ema50Series, ema50Series.length)} stroke="#A78BFA" strokeWidth={1} fill="none" opacity={0.5} strokeDasharray="4,2" />
           )}
 
           {/* Candlesticks */}
@@ -283,11 +326,9 @@ export function FibChart() {
             );
           })}
 
-          {/* ─── BUY/SELL signal flag on the trigger candle ─── */}
+          {/* BUY/SELL signal flag */}
           {currentSignal && (() => {
-            const idx = visibleCandles.findIndex(
-              (c) => c.epoch === currentSignal.signalCandleEpoch
-            );
+            const idx = visibleCandles.findIndex((c) => c.epoch === currentSignal.signalCandleEpoch);
             if (idx < 0) return null;
             const isBull = currentSignal.trend === "Bullish";
             const col = isBull ? C.green : C.red;
@@ -296,28 +337,14 @@ export function FibChart() {
             const flagLabel = isBull ? "▲ BUY" : "▼ SELL";
             const flagW = 36;
             const flagH = 16;
-
             if (isBull) {
               const tipY = priceToY(candle.high, lo, hi, plotH) - 4;
               const labelY = tipY - flagH - 4;
               return (
                 <G>
-                  {/* stem */}
-                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + flagH}
-                    stroke={col} strokeWidth={1} opacity={0.7} />
-                  {/* flag box */}
-                  <Rect
-                    x={cx - flagW / 2} y={labelY}
-                    width={flagW} height={flagH}
-                    fill={col} rx={4} opacity={0.92}
-                  />
-                  <SvgText
-                    x={cx} y={labelY + flagH - 4}
-                    fill="#fff" fontSize={9} fontWeight="bold"
-                    textAnchor="middle"
-                  >
-                    {flagLabel}
-                  </SvgText>
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY + flagH} stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Rect x={cx - flagW / 2} y={labelY} width={flagW} height={flagH} fill={col} rx={4} opacity={0.92} />
+                  <SvgText x={cx} y={labelY + flagH - 4} fill="#fff" fontSize={9} fontWeight="bold" textAnchor="middle">{flagLabel}</SvgText>
                 </G>
               );
             } else {
@@ -325,70 +352,47 @@ export function FibChart() {
               const labelY = tipY + 4;
               return (
                 <G>
-                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY}
-                    stroke={col} strokeWidth={1} opacity={0.7} />
-                  <Rect
-                    x={cx - flagW / 2} y={labelY}
-                    width={flagW} height={flagH}
-                    fill={col} rx={4} opacity={0.92}
-                  />
-                  <SvgText
-                    x={cx} y={labelY + flagH - 4}
-                    fill="#fff" fontSize={9} fontWeight="bold"
-                    textAnchor="middle"
-                  >
-                    {flagLabel}
-                  </SvgText>
+                  <Line x1={cx} y1={tipY} x2={cx} y2={labelY} stroke={col} strokeWidth={1} opacity={0.7} />
+                  <Rect x={cx - flagW / 2} y={labelY} width={flagW} height={flagH} fill={col} rx={4} opacity={0.92} />
+                  <SvgText x={cx} y={labelY + flagH - 4} fill="#fff" fontSize={9} fontWeight="bold" textAnchor="middle">{flagLabel}</SvgText>
                 </G>
               );
             }
           })()}
 
-          {/* ─── FIBONACCI LINES (drawn AFTER candles so labels are on top) ─── */}
-
+          {/* Fibonacci lines */}
           {fibLevels && (
             <>
-              {/* SWING HIGH with upward arrow ▲ */}
               <LabeledLine
-                label="▲ SWING HIGH (H)"
+                label="▲ SWING HIGH"
                 sublabel={`${fibLevels.swingHigh.toFixed(2)}`}
                 price={fibLevels.swingHigh}
                 color={C.green}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed={false} strokeWidth={1.5}
-                showArrow="up"
+                dashed={false} strokeWidth={1.5} showArrow="up"
               />
-
-              {/* 61.8% Zone top */}
               <LabeledLine
-                label="─ 61.8% ZONA ATAS"
+                label="61.8% ZONA ATAS"
                 price={fibLevels.level618}
                 color={C.gold}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                 dashed strokeWidth={1}
               />
-
-              {/* 78.6% Zone bottom */}
               <LabeledLine
-                label="─ 78.6% ZONA BAWAH"
+                label="78.6% ZONA BAWAH"
                 price={fibLevels.level786}
                 color={C.gold}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
                 dashed strokeWidth={1}
               />
-
-              {/* SWING LOW with downward arrow ▼ */}
               <LabeledLine
-                label="▼ SWING LOW (L)"
+                label="▼ SWING LOW"
                 sublabel={`${fibLevels.swingLow.toFixed(2)}`}
                 price={fibLevels.swingLow}
                 color={C.red}
                 lo={lo} hi={hi} plotH={plotH} plotW={plotW}
-                dashed={false} strokeWidth={1.5}
-                showArrow="down"
+                dashed={false} strokeWidth={1.5} showArrow="down"
               />
-
-              {/* -27% Extension = Target */}
               <LabeledLine
                 label="★ TARGET -27%"
                 sublabel="Take Profit Fibonacci"
@@ -400,7 +404,7 @@ export function FibChart() {
             </>
           )}
 
-          {/* ─── SIGNAL LINES ─── */}
+          {/* Signal lines */}
           {currentSignal && (
             <>
               <LabeledLine
@@ -430,7 +434,7 @@ export function FibChart() {
             </>
           )}
 
-          {/* ─── CURRENT PRICE BADGE ─── */}
+          {/* Current price badge */}
           {currentPrice !== null && (() => {
             const y = priceToY(currentPrice, lo, hi, plotH);
             const lastC = visibleCandles[visibleCandles.length - 1];
@@ -438,13 +442,8 @@ export function FibChart() {
             const lc = isBull ? C.green : C.red;
             return (
               <G>
-                <Line x1={0} y1={y} x2={plotW} y2={y}
-                  stroke={lc} strokeWidth={1} strokeDasharray="2,2" opacity={0.5} />
-                {/* Triangle pointer on right */}
-                <Polygon
-                  points={`${plotW},${y - 5} ${plotW + 6},${y} ${plotW},${y + 5}`}
-                  fill={lc}
-                />
+                <Line x1={0} y1={y} x2={plotW} y2={y} stroke={lc} strokeWidth={1} strokeDasharray="2,2" opacity={0.5} />
+                <Polygon points={`${plotW},${y - 5} ${plotW + 6},${y} ${plotW},${y + 5}`} fill={lc} />
                 <Rect x={plotW + 6} y={y - 8} width={RIGHT_W - 8} height={16} fill={lc} rx={3} />
                 <SvgText x={plotW + 9} y={y + 4} fill="#fff" fontSize={8.5} fontWeight="bold">
                   {currentPrice.toFixed(2)}
@@ -467,36 +466,21 @@ export function FibChart() {
         {currentSignal && <LegItem color={C.green} label="Take Profit" />}
       </View>
 
-      {/* Loading overlay — only show when there is truly no data at all */}
-      {candles.length === 0 && m15Candles.length === 0 && (
+      {/* No data overlay */}
+      {hasNoData && (
         <View style={styles.overlay}>
           <Text style={styles.overlayText}>Menghubungkan ke Deriv WebSocket...</Text>
           <Text style={[styles.overlayText, { fontSize: 10, marginTop: 4, opacity: 0.7 }]}>
-            Memuat data M15 + M5 pertama kali...
+            Memuat data candle historis...
           </Text>
-        </View>
-      )}
-      {/* Partial loading — M15 not yet complete but M5 has data */}
-      {candles.length > 0 && m15Candles.length > 0 && trend === "Loading" && (
-        <View style={[styles.overlay, { backgroundColor: "transparent" }]}>
-          <View style={styles.loadingPill}>
-            <Text style={styles.overlayText}>
-              M15: {m15Candles.length}/200
-            </Text>
-          </View>
         </View>
       )}
     </View>
   );
 }
 
-function LegItem({
-  color, label, line = false, box = false,
-}: {
-  color: string;
-  label: string;
-  line?: boolean;
-  box?: boolean;
+function LegItem({ color, label, line = false, box = false }: {
+  color: string; label: string; line?: boolean; box?: boolean;
 }) {
   return (
     <View style={styles.legItem}>
@@ -526,10 +510,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     alignItems: "center",
     paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    paddingTop: 10,
+    paddingBottom: 6,
   },
+  headerLeft: { flex: 1 },
   title: {
     fontFamily: "Inter_600SemiBold",
     fontSize: 10,
@@ -541,6 +525,42 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.5,
   },
+  tfRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    paddingHorizontal: 12,
+    paddingBottom: 8,
+    gap: 6,
+    borderBottomWidth: 1,
+    borderBottomColor: C.border,
+  },
+  tfBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: C.border,
+    backgroundColor: "transparent",
+  },
+  tfBtnActive: {
+    backgroundColor: C.gold + "20",
+    borderColor: C.gold,
+  },
+  tfBtnText: {
+    fontFamily: "Inter_600SemiBold",
+    fontSize: 12,
+    color: C.textDim,
+  },
+  tfBtnTextActive: {
+    color: C.gold,
+  },
+  tfSubtitle: {
+    fontFamily: "Inter_400Regular",
+    fontSize: 10,
+    color: C.textDim,
+    marginLeft: 4,
+    flex: 1,
+  },
   legend: {
     flexDirection: "row",
     flexWrap: "wrap",
@@ -550,38 +570,15 @@ const styles = StyleSheet.create({
     borderTopWidth: 1,
     borderTopColor: C.border,
   },
-  legItem: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
-  },
-  legDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  legLine: {
-    width: 14,
-    height: 2,
-    borderRadius: 1,
-  },
-  legBox: {
-    width: 10,
-    height: 8,
-    borderRadius: 2,
-    borderWidth: 1,
-  },
-  legText: {
-    fontFamily: "Inter_400Regular",
-    fontSize: 9,
-    color: C.textDim,
-  },
+  legItem: { flexDirection: "row", alignItems: "center", gap: 4 },
+  legDot: { width: 6, height: 6, borderRadius: 3 },
+  legLine: { width: 14, height: 2, borderRadius: 1 },
+  legBox: { width: 10, height: 8, borderRadius: 2, borderWidth: 1 },
+  legText: { fontFamily: "Inter_400Regular", fontSize: 9, color: C.textDim },
   overlay: {
     position: "absolute",
-    top: 42,
-    left: 0,
-    right: 0,
-    bottom: 32,
+    top: 80,
+    left: 0, right: 0, bottom: 32,
     justifyContent: "center",
     alignItems: "center",
     backgroundColor: C.card + "D0",
@@ -592,13 +589,5 @@ const styles = StyleSheet.create({
     color: C.textSub,
     textAlign: "center",
     paddingHorizontal: 20,
-  },
-  loadingPill: {
-    backgroundColor: C.cardAlt + "E0",
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 6,
-    borderWidth: 1,
-    borderColor: C.border,
   },
 });
