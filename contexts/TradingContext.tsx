@@ -201,56 +201,65 @@ function calcATR(candles: Candle[], period: number): number {
   return trs.slice(-period).reduce((a, b) => a + b, 0) / period;
 }
 
-// Find swing high/low pair for Fibonacci retracement using fractal pivots.
-// BEARISH: scan backwards for the most recent fractal HIGH, then take the
-//          lowest absolute low AFTER it — ensuring HIGH→LOW temporal order.
-// BULLISH: scan backwards for the most recent fractal LOW, then take the
-//          highest absolute high AFTER it — ensuring LOW→HIGH temporal order.
-// Using fractal pivots (not absolute extremes) keeps the range tight and fresh.
+// ─── Swing Detection ──────────────────────────────────────────────────────────
+// Returns anchorEpoch = epoch of the fractal candle itself.
+// This is the stability key — Fibonacci only changes when anchorEpoch changes.
+//
+// Bug fix: previously compared swingLow (absolute low that shifts every candle)
+// which caused Fibonacci to drift even when the fractal HIGH was unchanged.
+// Now we track anchorEpoch (the candle that IS the fractal) so zones are truly
+// locked until a genuinely new fractal pivot forms.
+//
+// BEARISH: most recent 5-bar fractal HIGH → lowest absolute low after it
+// BULLISH: most recent 5-bar fractal LOW  → highest absolute high after it
 function findSwings(
   candles: Candle[],
   trend: "Bullish" | "Bearish"
-): { swingHigh: number; swingLow: number } | null {
+): { swingHigh: number; swingLow: number; anchorEpoch: number } | null {
   const LOOKBACK = Math.min(candles.length, 100);
   const slice = candles.slice(-LOOKBACK);
   const n = slice.length;
   if (n < 10) return null;
 
   if (trend === "Bearish") {
-    // Scan backwards: find most recent 5-bar fractal HIGH, then lowest low after it
+    // Scan backwards: find most recent 5-bar fractal HIGH
+    // Valid: High[i] > High[i-1] & High[i-2] AND High[i] > High[i+1] & High[i+2]
     for (let i = n - 3; i >= 4; i--) {
       const c = slice[i];
-      if (
+      const isSwingHigh =
         c.high > slice[i - 1].high && c.high > slice[i - 2].high &&
-        c.high > slice[i + 1].high && c.high > slice[i + 2].high
-      ) {
-        let lowestLow = Infinity;
-        for (let j = i + 1; j < n; j++) {
-          if (slice[j].low < lowestLow) lowestLow = slice[j].low;
-        }
-        if (lowestLow === Infinity || lowestLow >= c.high) continue;
-        const range = c.high - lowestLow;
-        if (range < 5) continue;
-        return { swingHigh: c.high, swingLow: lowestLow };
+        c.high > slice[i + 1].high && c.high > slice[i + 2].high;
+      if (!isSwingHigh) continue;
+
+      // Take lowest absolute low AFTER the fractal (for initial range)
+      let lowestLow = Infinity;
+      for (let j = i + 1; j < n; j++) {
+        if (slice[j].low < lowestLow) lowestLow = slice[j].low;
       }
+      if (lowestLow === Infinity || lowestLow >= c.high) continue;
+      if (c.high - lowestLow < 5) continue;
+
+      return { swingHigh: c.high, swingLow: lowestLow, anchorEpoch: c.epoch };
     }
   } else {
-    // Bullish: scan backwards for most recent 5-bar fractal LOW, then highest high after it
+    // Scan backwards: find most recent 5-bar fractal LOW
+    // Valid: Low[i] < Low[i-1] & Low[i-2] AND Low[i] < Low[i+1] & Low[i+2]
     for (let i = n - 3; i >= 4; i--) {
       const c = slice[i];
-      if (
+      const isSwingLow =
         c.low < slice[i - 1].low && c.low < slice[i - 2].low &&
-        c.low < slice[i + 1].low && c.low < slice[i + 2].low
-      ) {
-        let highestHigh = -Infinity;
-        for (let j = i + 1; j < n; j++) {
-          if (slice[j].high > highestHigh) highestHigh = slice[j].high;
-        }
-        if (highestHigh === -Infinity || highestHigh <= c.low) continue;
-        const range = highestHigh - c.low;
-        if (range < 5) continue;
-        return { swingHigh: highestHigh, swingLow: c.low };
+        c.low < slice[i + 1].low && c.low < slice[i + 2].low;
+      if (!isSwingLow) continue;
+
+      // Take highest absolute high AFTER the fractal (for initial range)
+      let highestHigh = -Infinity;
+      for (let j = i + 1; j < n; j++) {
+        if (slice[j].high > highestHigh) highestHigh = slice[j].high;
       }
+      if (highestHigh === -Infinity || highestHigh <= c.low) continue;
+      if (highestHigh - c.low < 5) continue;
+
+      return { swingHigh: highestHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
   }
   return null;
@@ -344,7 +353,9 @@ export function TradingProvider({ children }: { children: ReactNode }) {
   const wasOpenRef = useRef<boolean>(forexMarketOpen());
   const derivMarketClosedRef = useRef<boolean>(false);
   // FIBONACCI STABILITY RULE: track last swing to avoid recalculating every candle
-  const lastSwingRef = useRef<{ swingHigh: number; swingLow: number; trend: string } | null>(null);
+  // anchorEpoch = epoch of the fractal candle (the TRUE stability key).
+  // Fibonacci updates ONLY when a new fractal pivot forms, not when price drifts.
+  const lastSwingRef = useRef<{ anchorEpoch: number; trend: string } | null>(null);
 
   // ─── Startup: load all cached data instantly ──────────────────────────────
   useEffect(() => {
@@ -694,14 +705,15 @@ export function TradingProvider({ children }: { children: ReactNode }) {
     }
 
     const last = lastSwingRef.current;
-    // Only recalculate Fibonacci if the swing high/low actually changed
-    if (
-      !last ||
-      last.trend !== trend ||
-      last.swingHigh !== swings.swingHigh ||
-      last.swingLow !== swings.swingLow
-    ) {
-      lastSwingRef.current = { swingHigh: swings.swingHigh, swingLow: swings.swingLow, trend };
+    // ── STABILITY RULE (fixed) ─────────────────────────────────────────────
+    // Compare by anchorEpoch (the fractal candle's timestamp), NOT by price.
+    // Previously: last.swingLow !== swings.swingLow → this fired every candle
+    //   because absolute-low shifts whenever price makes a new low, even though
+    //   the fractal HIGH anchor was unchanged.
+    // Now: Fibonacci only recalculates when a DIFFERENT fractal candle is the
+    //   anchor — i.e., a genuinely new swing has formed on M15.
+    if (!last || last.trend !== trend || last.anchorEpoch !== swings.anchorEpoch) {
+      lastSwingRef.current = { anchorEpoch: swings.anchorEpoch, trend };
       setFibLevels(calcFib(swings.swingHigh, swings.swingLow, trend as "Bullish" | "Bearish"));
     }
   }, [m15Candles, trend]);

@@ -157,17 +157,20 @@ function calcATR(candles: Candle[], period: number): number {
 // Trend Alignment:
 //   Bearish → pull from Latest Swing High → Latest Swing Low
 //   Bullish → pull from Latest Swing Low  → Latest Swing High
+// anchorEpoch is the epoch of the fractal candle itself — the TRUE stability key.
+// Fibonacci only recalculates when anchorEpoch changes (new fractal pivot on M15).
+// Bug fix: previously compared swingLow/swingHigh prices which drift every candle.
 function findSwings(
   candles: Candle[],
   trend: "Bullish" | "Bearish"
-): { swingHigh: number; swingLow: number } | null {
+): { swingHigh: number; swingLow: number; anchorEpoch: number } | null {
   const LOOKBACK = Math.min(candles.length, 100);
   const slice = candles.slice(-LOOKBACK);
   const n = slice.length;
   if (n < 10) return null;
 
   if (trend === "Bearish") {
-    // Find most recent fractal HIGH → then lowest low AFTER it
+    // Find most recent 5-bar fractal HIGH → then lowest absolute low AFTER it
     for (let i = n - 3; i >= 4; i--) {
       const c = slice[i];
       const isSwingHigh =
@@ -182,12 +185,11 @@ function findSwings(
         if (slice[j].low < lowestLow) lowestLow = slice[j].low;
       }
       if (lowestLow === Infinity || lowestLow >= c.high) continue;
-      const range = c.high - lowestLow;
-      if (range < 5) continue;
-      return { swingHigh: c.high, swingLow: lowestLow };
+      if (c.high - lowestLow < 5) continue;
+      return { swingHigh: c.high, swingLow: lowestLow, anchorEpoch: c.epoch };
     }
   } else {
-    // Bullish: find most recent fractal LOW → then highest high AFTER it
+    // Bullish: find most recent 5-bar fractal LOW → then highest absolute high AFTER it
     for (let i = n - 3; i >= 4; i--) {
       const c = slice[i];
       const isSwingLow =
@@ -202,9 +204,8 @@ function findSwings(
         if (slice[j].high > highestHigh) highestHigh = slice[j].high;
       }
       if (highestHigh === -Infinity || highestHigh <= c.low) continue;
-      const range = highestHigh - c.low;
-      if (range < 5) continue;
-      return { swingHigh: highestHigh, swingLow: c.low };
+      if (highestHigh - c.low < 5) continue;
+      return { swingHigh: highestHigh, swingLow: c.low, anchorEpoch: c.epoch };
     }
   }
   return null;
@@ -305,7 +306,8 @@ class DerivService {
 
   private connectionStatus: "connecting" | "connected" | "disconnected" = "disconnected";
 
-  private lastSwing: { swingHigh: number; swingLow: number; trend: string } | null = null;
+  // anchorEpoch = fractal candle epoch. TRUE stability key (not price values).
+  private lastSwing: { anchorEpoch: number; trend: string } | null = null;
   private fibLevels: FibLevels | null = null;
   private currentSignal: TradingSignal | null = null;
   private signalHistory: TradingSignal[] = [];
@@ -502,19 +504,18 @@ class DerivService {
       return;
     }
 
-    // FIBONACCI STABILITY: only update when swing actually changes
+    // FIBONACCI STABILITY: only update when fractal ANCHOR CANDLE changes.
+    // Compare by anchorEpoch (the timestamp of the fractal candle), NOT by price.
+    // Previously: last.swingLow !== swings.swingLow fired every candle because
+    // absolute-low shifts whenever price makes a new low — now fixed.
     const swings = findSwings(this.m15Candles, trend);
     if (swings) {
       const last = this.lastSwing;
-      if (
-        !last ||
-        last.trend !== trend ||
-        last.swingHigh !== swings.swingHigh ||
-        last.swingLow !== swings.swingLow
-      ) {
-        this.lastSwing = { ...swings, trend };
+      if (!last || last.trend !== trend || last.anchorEpoch !== swings.anchorEpoch) {
+        this.lastSwing = { anchorEpoch: swings.anchorEpoch, trend };
         this.fibLevels = calcFib(swings.swingHigh, swings.swingLow, trend as "Bullish" | "Bearish");
-        console.log(`[DerivService] New swing detected! High: ${swings.swingHigh}, Low: ${swings.swingLow}, Trend: ${trend}`);
+        const anchorDate = new Date(swings.anchorEpoch * 1000).toISOString();
+        console.log(`[DerivService] New fractal anchor! Epoch: ${anchorDate}, High: ${swings.swingHigh}, Low: ${swings.swingLow}, Trend: ${trend}`);
       }
     } else {
       this.lastSwing = null;
